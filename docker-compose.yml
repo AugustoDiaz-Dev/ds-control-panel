@@ -1,0 +1,66 @@
+services:
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ds-control-panel-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./mlruns:/app/mlruns
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - ds-control-panel-network
+
+  # MLflow UI
+  mlflow:
+    image: python:3.12-slim
+    container_name: ds-control-panel-mlflow
+    working_dir: /app
+    command: >
+      sh -c "pip install mlflow==2.11.3 --no-cache-dir &&
+             mlflow ui --backend-store-uri ./mlruns --host 0.0.0.0 --port 5001"
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./mlruns:/app/mlruns
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - ds-control-panel-network
+
+  # Jupyter Notebook (optional)
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: ds-control-panel-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebook:/home/jovyan/work/notebook
+      - ./data:/home/jovyan/work/data
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.ip='0.0.0.0'
+    restart: unless-stopped
+    networks:
+      - ds-control-panel-network
+
+networks:
+  ds-control-panel-network:
+    driver: bridge
+

@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Generate changelog
+      run: |
+        echo "## Release Notes" > RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "Version: ${GITHUB_REF#refs/tags/}" >> RELEASE_NOTES.md
+        echo "Commit: ${GITHUB_SHA}" >> RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "### Changes" >> RELEASE_NOTES.md
+        git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> RELEASE_NOTES.md || echo "- Initial release" >> RELEASE_NOTES.md
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+

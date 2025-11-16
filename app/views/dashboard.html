@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DS Control Panel - Interactive Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-card: #ffffff;
+            --text-primary: #1a1a1a;
+            --text-secondary: #666666;
+            --accent: #000000;
+            --accent-light: #333333;
+            --border: #e0e0e0;
+            --shadow: rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-card: #1e1e1e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --accent: #ffffff;
+            --accent-light: #e0e0e0;
+            --border: #333333;
+            --shadow: rgba(0, 0, 0, 0.5);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: background 0.3s ease, color 0.3s ease;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 20px var(--shadow);
+            border: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: var(--accent);
+            color: var(--bg-primary);
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--shadow);
+            background: var(--accent-light);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-secondary:hover {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .theme-toggle {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 50px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .theme-toggle:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 4px 20px var(--shadow);
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .card h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 1rem;
+        }
+
+        .model-selector {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .model-btn {
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .model-btn:hover {
+            border-color: var(--accent);
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .model-btn.active {
+            background: var(--accent);
+            color: var(--bg-primary);
+            border-color: var(--accent);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border);
+            margin-top: 4rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity 0.3s ease;
+        }
+
+        footer a:hover {
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>📊 Interactive Dashboard</h1>
+                <p style="color: var(--text-secondary); margin-top: 0.5rem;">Model Performance Visualizations</p>
+            </div>
+            <div class="header-actions">
+                <div class="status-badge" id="apiStatus">
+                    <span class="status-dot"></span>
+                    <span>API: Checking...</span>
+                </div>
+                <a href="index.html" class="btn btn-secondary">
+                    <span class="material-icons">home</span>
+                    Home
+                </a>
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    <span class="material-icons" id="themeIcon">dark_mode</span>
+                    <span id="themeText">Dark Mode</span>
+                </button>
+            </div>
+        </header>
+
+        <div id="noModelsMessage" class="card" style="display: none;">
+            <h2>⚠️ No Models Trained</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Please train models first using the API or the training endpoint.
+            </p>
+            <a href="http://localhost:8000/docs" target="_blank" class="btn">
+                <span class="material-icons">api</span>
+                Open API Docs
+            </a>
+        </div>
+
+        <div id="dashboardContent" style="display: none;">
+            <!-- Model Comparison -->
+            <div class="card full-width">
+                <h2>📈 Model Comparison</h2>
+                <div class="chart-container">
+                    <canvas id="comparisonChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Metrics Overview -->
+            <div class="card full-width">
+                <h2>📊 Metrics Overview</h2>
+                <div class="model-selector" id="metricsModelSelector"></div>
+                <div class="metrics-grid" id="metricsGrid"></div>
+            </div>
+
+            <!-- ROC Curve -->
+            <div class="card">
+                <h2>📉 ROC Curve</h2>
+                <div class="model-selector" id="rocModelSelector"></div>
+                <div class="chart-container">
+                    <canvas id="rocChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Confusion Matrix -->
+            <div class="card">
+                <h2>🔢 Confusion Matrix</h2>
+                <div class="model-selector" id="cmModelSelector"></div>
+                <div class="chart-container">
+                    <canvas id="confusionMatrixChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Feature Importance -->
+            <div class="card full-width">
+                <h2>🎯 Feature Importance</h2>
+                <div class="model-selector" id="fiModelSelector"></div>
+                <div class="chart-container">
+                    <canvas id="featureImportanceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let comparisonChart = null;
+        let rocChart = null;
+        let confusionMatrixChart = null;
+        let featureImportanceChart = null;
+        let availableModels = [];
+        let selectedModel = null;
+
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            updateThemeIcon(newTheme);
+            updateChartsTheme();
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            const text = document.getElementById('themeText');
+            if (theme === 'dark') {
+                icon.textContent = 'light_mode';
+                text.textContent = 'Light Mode';
+            } else {
+                icon.textContent = 'dark_mode';
+                text.textContent = 'Dark Mode';
+            }
+        }
+
+        function updateChartsTheme() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const textColor = isDark ? '#ffffff' : '#1a1a1a';
+            const gridColor = isDark ? '#333333' : '#e0e0e0';
+            
+            Chart.defaults.color = textColor;
+            Chart.defaults.borderColor = gridColor;
+            
+            // Update existing charts
+            [comparisonChart, rocChart, confusionMatrixChart, featureImportanceChart].forEach(chart => {
+                if (chart) {
+                    chart.options.scales = chart.options.scales || {};
+                    if (chart.options.scales.x) chart.options.scales.x.grid.color = gridColor;
+                    if (chart.options.scales.y) chart.options.scales.y.grid.color = gridColor;
+                    chart.update();
+                }
+            });
+        }
+
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        updateThemeIcon(savedTheme);
+
+        // Check API status
+        async function checkApiStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/`);
+                if (response.ok) {
+                    document.getElementById('apiStatus').innerHTML = 
+                        '<span class="status-dot"></span><span>API: Online</span>';
+                    return true;
+                }
+            } catch (error) {
+                document.getElementById('apiStatus').innerHTML = 
+                    '<span class="status-dot" style="background: #f44336;"></span><span>API: Offline</span>';
+            }
+            return false;
+        }
+
+        // Load model comparison
+        async function loadModelComparison() {
+            try {
+                // Try visualization endpoint first, fallback to metrics
+                let response = await fetch(`${API_BASE}/visualizations/model-comparison`);
+                if (!response.ok) {
+                    // Fallback to metrics endpoint
+                    response = await fetch(`${API_BASE}/metrics`);
+                    if (!response.ok) throw new Error('Failed to load model comparison');
+                    const metricsData = await response.json();
+                    // Convert metrics format to comparison format
+                    const models = Object.keys(metricsData.metrics || {});
+                    if (models.length === 0) {
+                        document.getElementById('noModelsMessage').style.display = 'block';
+                        return;
+                    }
+                    availableModels = models;
+                    document.getElementById('dashboardContent').style.display = 'block';
+                    selectedModel = availableModels[0];
+                    
+                    // Create comparison chart from metrics
+                    const ctx = document.getElementById('comparisonChart').getContext('2d');
+                    if (comparisonChart) comparisonChart.destroy();
+                    
+                    const metrics = metricsData.metrics;
+                    const modelData = models.map(name => ({
+                        name,
+                        ...metrics[name]
+                    }));
+                    
+                    comparisonChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: modelData.map(m => m.name),
+                            datasets: [
+                                {
+                                    label: 'Accuracy',
+                                    data: modelData.map(m => m.accuracy),
+                                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                    borderColor: 'rgba(54, 162, 235, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: 'Precision',
+                                    data: modelData.map(m => m.precision),
+                                    backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                                    borderColor: 'rgba(255, 99, 132, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: 'Recall',
+                                    data: modelData.map(m => m.recall),
+                                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                                    borderColor: 'rgba(75, 192, 192, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: 'F1 Score',
+                                    data: modelData.map(m => m.f1_score),
+                                    backgroundColor: 'rgba(255, 206, 86, 0.6)',
+                                    borderColor: 'rgba(255, 206, 86, 1)',
+                                    borderWidth: 1
+                                },
+                                {
+                                    label: 'AUC',
+                                    data: modelData.map(m => m.auc),
+                                    backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                                    borderColor: 'rgba(153, 102, 255, 1)',
+                                    borderWidth: 1
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Model Performance Comparison'
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    max: 1
+                                }
+                            }
+                        }
+                    });
+                    
+                    initializeModelSelectors();
+                    loadAllVisualizations();
+                    return;
+                }
+                
+                const data = await response.json();
+                availableModels = data.models.map(m => m.model_name);
+                
+                if (availableModels.length === 0) {
+                    document.getElementById('noModelsMessage').style.display = 'block';
+                    return;
+                }
+                
+                document.getElementById('dashboardContent').style.display = 'block';
+                selectedModel = availableModels[0];
+                
+                // Create comparison chart
+                const ctx = document.getElementById('comparisonChart').getContext('2d');
+                if (comparisonChart) comparisonChart.destroy();
+                
+                comparisonChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.models.map(m => m.model_name),
+                        datasets: [
+                            {
+                                label: 'Accuracy',
+                                data: data.models.map(m => m.accuracy),
+                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Precision',
+                                data: data.models.map(m => m.precision),
+                                backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Recall',
+                                data: data.models.map(m => m.recall),
+                                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'F1 Score',
+                                data: data.models.map(m => m.f1_score),
+                                backgroundColor: 'rgba(255, 206, 86, 0.6)',
+                                borderColor: 'rgba(255, 206, 86, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'AUC',
+                                data: data.models.map(m => m.auc),
+                                backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                            },
+                            title: {
+                                display: true,
+                                text: 'Model Performance Comparison'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+                
+                // Initialize model selectors
+                initializeModelSelectors();
+                loadAllVisualizations();
+                
+            } catch (error) {
+                console.error('Error loading model comparison:', error);
+                document.getElementById('noModelsMessage').style.display = 'block';
+            }
+        }
+
+        function initializeModelSelectors() {
+            const selectors = ['metricsModelSelector', 'rocModelSelector', 'cmModelSelector', 'fiModelSelector'];
+            selectors.forEach(selectorId => {
+                const selector = document.getElementById(selectorId);
+                selector.innerHTML = '';
+                availableModels.forEach(model => {
+                    const btn = document.createElement('button');
+                    btn.className = `model-btn ${model === selectedModel ? 'active' : ''}`;
+                    btn.textContent = model;
+                    btn.onclick = () => {
+                        selectedModel = model;
+                        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        loadAllVisualizations();
+                    };
+                    selector.appendChild(btn);
+                });
+            });
+        }
+
+        async function loadAllVisualizations() {
+            if (!selectedModel) return;
+            
+            await Promise.all([
+                loadMetrics(),
+                loadROC(),
+                loadConfusionMatrix(),
+                loadFeatureImportance()
+            ]);
+        }
+
+        async function loadMetrics() {
+            try {
+                // Try the all-visualizations endpoint first
+                let response = await fetch(`${API_BASE}/visualizations/all/${selectedModel}`);
+                if (!response.ok) {
+                    // Fallback to metrics endpoint
+                    response = await fetch(`${API_BASE}/metrics`);
+                    if (!response.ok) throw new Error('Failed to load metrics');
+                    const data = await response.json();
+                    const modelMetrics = data.metrics[selectedModel];
+                    if (!modelMetrics) return;
+                    
+                    const grid = document.getElementById('metricsGrid');
+                    grid.innerHTML = `
+                        <div class="metric-card">
+                            <div class="metric-label">Accuracy</div>
+                            <div class="metric-value">${(modelMetrics.accuracy * 100).toFixed(2)}%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Precision</div>
+                            <div class="metric-value">${(modelMetrics.precision * 100).toFixed(2)}%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Recall</div>
+                            <div class="metric-value">${(modelMetrics.recall * 100).toFixed(2)}%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">F1 Score</div>
+                            <div class="metric-value">${(modelMetrics.f1_score * 100).toFixed(2)}%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">AUC</div>
+                            <div class="metric-value">${(modelMetrics.auc * 100).toFixed(2)}%</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const data = await response.json();
+                const modelMetrics = data.metrics;
+                
+                const grid = document.getElementById('metricsGrid');
+                grid.innerHTML = `
+                    <div class="metric-card">
+                        <div class="metric-label">Accuracy</div>
+                        <div class="metric-value">${(modelMetrics.accuracy * 100).toFixed(2)}%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Precision</div>
+                        <div class="metric-value">${(modelMetrics.precision * 100).toFixed(2)}%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Recall</div>
+                        <div class="metric-value">${(modelMetrics.recall * 100).toFixed(2)}%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">F1 Score</div>
+                        <div class="metric-value">${(modelMetrics.f1_score * 100).toFixed(2)}%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">AUC</div>
+                        <div class="metric-value">${(modelMetrics.auc * 100).toFixed(2)}%</div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading metrics:', error);
+            }
+        }
+
+        async function loadROC() {
+            try {
+                // Try the all-visualizations endpoint first
+                let response = await fetch(`${API_BASE}/visualizations/all/${selectedModel}`);
+                if (!response.ok) {
+                    // Fallback to individual endpoint
+                    response = await fetch(`${API_BASE}/visualizations/roc-curve/${selectedModel}`);
+                    if (!response.ok) throw new Error('Failed to load ROC curve');
+                }
+                
+                const data = await response.json();
+                const rocData = data.roc_curve || data;
+                const ctx = document.getElementById('rocChart').getContext('2d');
+                
+                if (rocChart) rocChart.destroy();
+                
+                const fpr = rocData.fpr || [];
+                const tpr = rocData.tpr || [];
+                const auc = rocData.auc || 0;
+                const modelName = data.model_name || selectedModel;
+                
+                rocChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [
+                            {
+                                label: `${modelName} (AUC: ${auc.toFixed(3)})`,
+                                data: fpr.map((fprVal, i) => ({x: fprVal, y: tpr[i]})),
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'Random Classifier',
+                                data: [{x: 0, y: 0}, {x: 1, y: 1}],
+                                borderColor: 'rgba(200, 200, 200, 0.5)',
+                                borderWidth: 1,
+                                borderDash: [5, 5],
+                                pointRadius: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                            },
+                            title: {
+                                display: true,
+                                text: 'ROC Curve'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: 'False Positive Rate'
+                                },
+                                min: 0,
+                                max: 1
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'True Positive Rate'
+                                },
+                                min: 0,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading ROC curve:', error);
+            }
+        }
+
+        async function loadConfusionMatrix() {
+            try {
+                // Try the all-visualizations endpoint first
+                let response = await fetch(`${API_BASE}/visualizations/all/${selectedModel}`);
+                if (!response.ok) {
+                    // Fallback to individual endpoint
+                    response = await fetch(`${API_BASE}/visualizations/confusion-matrix/${selectedModel}`);
+                    if (!response.ok) throw new Error('Failed to load confusion matrix');
+                }
+                
+                const data = await response.json();
+                const cmData = data.confusion_matrix || data;
+                const ctx = document.getElementById('confusionMatrixChart').getContext('2d');
+                
+                if (confusionMatrixChart) confusionMatrixChart.destroy();
+                
+                const matrix = cmData.matrix || cmData.confusion_matrix || [];
+                const labels = cmData.labels || ["Bad Credit", "Good Credit"];
+                
+                if (matrix.length === 0) {
+                    console.error('No confusion matrix data available');
+                    return;
+                }
+                
+                confusionMatrixChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Predicted: ' + labels[0],
+                                data: [matrix[0][0], matrix[1][0]],
+                                backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Predicted: ' + labels[1],
+                                data: [matrix[0][1], matrix[1][1]],
+                                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                            },
+                            title: {
+                                display: true,
+                                text: 'Confusion Matrix'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                stacked: true,
+                                title: {
+                                    display: true,
+                                    text: 'Actual'
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                title: {
+                                    display: true,
+                                    text: 'Count'
+                                },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading confusion matrix:', error);
+            }
+        }
+
+        async function loadFeatureImportance() {
+            try {
+                // Try the all-visualizations endpoint first
+                let response = await fetch(`${API_BASE}/visualizations/all/${selectedModel}`);
+                if (!response.ok) {
+                    // Fallback to individual endpoint
+                    response = await fetch(`${API_BASE}/visualizations/feature-importance/${selectedModel}`);
+                    if (!response.ok) throw new Error('Failed to load feature importance');
+                }
+                
+                const data = await response.json();
+                const fiData = data.feature_importance || data;
+                const ctx = document.getElementById('featureImportanceChart').getContext('2d');
+                
+                if (featureImportanceChart) featureImportanceChart.destroy();
+                
+                const features = fiData.features || [];
+                const importances = fiData.importances || [];
+                
+                if (features.length === 0 || importances.length === 0) {
+                    console.error('No feature importance data available');
+                    return;
+                }
+                
+                // Sort by importance
+                const sorted = features.map((f, i) => ({feature: f, importance: importances[i]}))
+                    .sort((a, b) => b.importance - a.importance);
+                
+                featureImportanceChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: sorted.map(s => s.feature),
+                        datasets: [{
+                            label: 'Importance',
+                            data: sorted.map(s => s.importance),
+                            backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Feature Importance'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Importance'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading feature importance:', error);
+            }
+        }
+
+        // Initialize
+        window.addEventListener('load', async () => {
+            await checkApiStatus();
+            await loadModelComparison();
+            setInterval(checkApiStatus, 30000); // Check every 30 seconds
+        });
+    </script>
+
+    <footer>
+        <p style="margin-top: 1rem; font-size: 0.9rem;">
+            © <a href="https://github.com/AugustoDiaz-Dev" target="_blank" rel="noopener noreferrer">Augusto Diaz</a> 2025
+        </p>
+    </footer>
+</body>
+</html>
+

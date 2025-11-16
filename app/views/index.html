@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DS Control Panel - Data Science Experimentation Platform</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-card: #ffffff;
+            --text-primary: #1a1a1a;
+            --text-secondary: #666666;
+            --accent: #000000;
+            --accent-light: #333333;
+            --border: #e0e0e0;
+            --shadow: rgba(0, 0, 0, 0.1);
+            --gradient-start: #f8f8f8;
+            --gradient-end: #ffffff;
+            --metallic: linear-gradient(135deg, #e8e8e8 0%, #ffffff 50%, #e8e8e8 100%);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-card: #1e1e1e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --accent: #ffffff;
+            --accent-light: #e0e0e0;
+            --border: #333333;
+            --shadow: rgba(0, 0, 0, 0.5);
+            --gradient-start: #1a1a1a;
+            --gradient-end: #0a0a0a;
+            --metallic: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #2a2a2a 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: background 0.3s ease, color 0.3s ease;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            background: var(--metallic);
+            border-radius: 24px;
+            padding: 3rem 2rem;
+            margin-bottom: 3rem;
+            box-shadow: 0 8px 32px var(--shadow);
+            border: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 2rem;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .theme-toggle {
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 50px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .theme-toggle:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .theme-toggle .material-icons {
+            font-size: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 4px 20px var(--shadow);
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--metallic);
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 12px 40px var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .card-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            background: var(--metallic);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .card-icon .material-icons {
+            font-size: 32px;
+            color: var(--accent);
+        }
+
+        .card h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .card p {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            line-height: 1.7;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: var(--accent);
+            color: var(--bg-primary);
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--shadow);
+            background: var(--accent-light);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-secondary:hover {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .section {
+            margin-bottom: 4rem;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: start;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .feature-item .material-icons {
+            color: var(--accent);
+            font-size: 24px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            margin-left: 0.5rem;
+        }
+
+        .api-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            margin-top: 1rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border);
+            margin-top: 4rem;
+        }
+
+        .code-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>DS Control Panel</h1>
+                    <p class="subtitle">Interactive Data Science Experimentation Platform</p>
+                    <div class="api-status" id="apiStatus">
+                        <span class="status-dot"></span>
+                        <span>API Status: Checking...</span>
+                    </div>
+                </div>
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    <span class="material-icons" id="themeIcon">dark_mode</span>
+                    <span id="themeText">Dark Mode</span>
+                </button>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-icon">
+                    <span class="material-icons">api</span>
+                </div>
+                <h2>API Documentation</h2>
+                <p>Interactive Swagger UI to explore and test all API endpoints. Train models, make predictions, and view metrics.</p>
+                <a href="http://localhost:8000/docs" target="_blank" class="btn">
+                    <span class="material-icons">open_in_new</span>
+                    Open API Docs
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-icon">
+                    <span class="material-icons">science</span>
+                </div>
+                <h2>Jupyter Notebook</h2>
+                <p>Interactive control panel for real-time experimentation. Visualize models, tune parameters, and make predictions.</p>
+                <a href="http://localhost:8888/lab/tree/notebook" target="_blank" class="btn">
+                    <span class="material-icons">open_in_new</span>
+                    Open Notebook
+                </a>
+                <a href="http://localhost:8888" target="_blank" class="btn btn-secondary" style="margin-top: 0.5rem; display: inline-flex;">
+                    <span class="material-icons">folder</span>
+                    Jupyter Home
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-icon">
+                    <span class="material-icons">bar_chart</span>
+                </div>
+                <h2>Interactive Dashboard</h2>
+                <p>Visualize model performance with interactive charts. Compare models, view ROC curves, confusion matrices, and feature importance.</p>
+                <a href="dashboard.html" class="btn">
+                    <span class="material-icons">open_in_new</span>
+                    Open Dashboard
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-icon">
+                    <span class="material-icons">dashboard</span>
+                </div>
+                <h2>API Endpoints</h2>
+                <p>Direct access to REST API endpoints for programmatic access and integration.</p>
+                <a href="http://localhost:8000" target="_blank" class="btn btn-secondary">
+                    <span class="material-icons">link</span>
+                    View Endpoints
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-icon">
+                    <span class="material-icons">track_changes</span>
+                </div>
+                <h2>MLflow Tracking</h2>
+                <p>Experiment tracking and model registry. View all training runs, compare metrics, and manage model versions.</p>
+                <a href="http://localhost:5001" target="_blank" class="btn">
+                    <span class="material-icons">open_in_new</span>
+                    Open MLflow UI
+                </a>
+                <a href="http://localhost:8000/mlflow/experiments" target="_blank" class="btn btn-secondary" style="margin-top: 0.5rem; display: inline-flex;">
+                    <span class="material-icons">api</span>
+                    MLflow API
+                </a>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Project Overview</h2>
+            <div class="card">
+                <p>This project creates an interactive Data Science control panel for real-time experimentation using Jupyter notebooks and a FastAPI backend. It focuses on a financial classification problem and compares multiple algorithms including LightGBM, XGBoost, Random Forest, and others.</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Features</h2>
+            <div class="features-grid">
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">speed</span>
+                    </div>
+                    <h2>FastAPI Backend</h2>
+                    <p>Production-ready API for model training and predictions</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">psychology</span>
+                    </div>
+                    <h2>Multiple ML Models</h2>
+                    <p>LightGBM, XGBoost, Random Forest, Extra Trees, CatBoost</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">tune</span>
+                    </div>
+                    <h2>Real-time Tuning</h2>
+                    <p>Adjust hyperparameters and retrain models on the fly</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">assessment</span>
+                    </div>
+                    <h2>Comprehensive Metrics</h2>
+                    <p>AUC, Accuracy, Precision, Recall, F1 Score</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">compare_arrows</span>
+                    </div>
+                    <h2>Model Comparison</h2>
+                    <p>Visualize and compare model performance</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">book</span>
+                    </div>
+                    <h2>Interactive Notebook</h2>
+                    <p>Jupyter notebook for experimentation and visualization</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">track_changes</span>
+                    </div>
+                    <h2>MLflow Integration</h2>
+                    <p>Experiment tracking, model versioning, and performance comparison</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <span class="material-icons">bar_chart</span>
+                    </div>
+                    <h2>Interactive Dashboard</h2>
+                    <p>Real-time visualizations: ROC curves, confusion matrices, feature importance, and model comparisons</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Quick Start</h2>
+            <div class="card">
+                <h3>1. Train Models</h3>
+                <div class="code-block">
+POST http://localhost:8000/train?n_estimators=100&learning_rate=0.1&max_depth=5
+                </div>
+
+                <h3 style="margin-top: 1.5rem;">2. Make Predictions</h3>
+                <div class="code-block">
+POST http://localhost:8000/predict
+Content-Type: application/json
+
+{
+  "features": [750, 80000, 15000, 35, 60000, 8, 25000]
+}
+                </div>
+
+                <h3 style="margin-top: 1.5rem;">3. View Metrics</h3>
+                <div class="code-block">
+GET http://localhost:8000/metrics
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Dataset</h2>
+            <div class="card">
+                <p>The project uses a synthetic financial dataset with the following features:</p>
+                <ul style="margin-top: 1rem; padding-left: 1.5rem; color: var(--text-secondary);">
+                    <li><strong>credit_score:</strong> Credit score (normalized)</li>
+                    <li><strong>income:</strong> Annual income</li>
+                    <li><strong>debt:</strong> Current debt</li>
+                    <li><strong>age:</strong> Age of applicant</li>
+                    <li><strong>loan_amount:</strong> Requested loan amount</li>
+                    <li><strong>employment_years:</strong> Years of employment</li>
+                    <li><strong>savings:</strong> Current savings</li>
+                </ul>
+                <p style="margin-top: 1rem;"><strong>Target:</strong> Binary classification (1 = Good credit risk, 0 = Bad credit risk)</p>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>DS Control Panel - Data Science Experimentation Platform</p>
+        <p style="margin-top: 0.5rem; font-size: 0.9rem;">Built with FastAPI, Jupyter, and modern ML frameworks</p>
+        <p style="margin-top: 1rem; font-size: 0.9rem;">
+            © <a href="https://github.com/AugustoDiaz-Dev" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-weight: 500;">Augusto Diaz</a> 2025
+        </p>
+    </footer>
+
+    <script>
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            updateThemeIcon(newTheme);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('themeIcon');
+            const text = document.getElementById('themeText');
+            if (theme === 'dark') {
+                icon.textContent = 'light_mode';
+                text.textContent = 'Light Mode';
+            } else {
+                icon.textContent = 'dark_mode';
+                text.textContent = 'Dark Mode';
+            }
+        }
+
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        updateThemeIcon(savedTheme);
+
+        // Check API status
+        async function checkApiStatus() {
+            const statusEl = document.getElementById('apiStatus');
+            if (!statusEl) return;
+            
+            try {
+                const response = await fetch('http://localhost:8000/', {
+                    method: 'GET',
+                    mode: 'cors',
+                    cache: 'no-cache'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    statusEl.innerHTML = '<span class="status-dot"></span><span>API Status: Online</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="status-dot" style="background: #ff9800;"></span><span>API Status: Error</span>';
+                }
+            } catch (error) {
+                // CORS error or network issue
+                statusEl.innerHTML = '<span class="status-dot" style="background: #f44336;"></span><span>API Status: Offline</span>';
+            }
+        }
+
+        // Initial check after page load
+        window.addEventListener('load', function() {
+            checkApiStatus();
+            // Check every 10 seconds
+            setInterval(checkApiStatus, 10000);
+        });
+    </script>
+</body>
+</html>
+
