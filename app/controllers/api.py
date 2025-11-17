@@ -205,6 +205,15 @@ def train_lightgbm(X_train, y_train, X_test, y_test, n_estimators=100, learning_
     """Train LightGBM model"""
     if not LIGHTGBM_AVAILABLE:
         return None, None
+    
+    # Validate parameters
+    if n_estimators < 1:
+        n_estimators = 100
+    if learning_rate <= 0:
+        learning_rate = 0.1
+    if max_depth < 1:
+        max_depth = 5
+    
     model = lgb.LGBMClassifier(
         n_estimators=n_estimators,
         learning_rate=learning_rate,
@@ -231,6 +240,15 @@ def train_xgboost(X_train, y_train, X_test, y_test, n_estimators=100, learning_r
     """Train XGBoost model"""
     if not XGBOOST_AVAILABLE:
         return None, None
+    
+    # Validate parameters
+    if n_estimators < 1:
+        n_estimators = 100
+    if learning_rate <= 0:
+        learning_rate = 0.1
+    if max_depth < 1:
+        max_depth = 5
+    
     model = xgb.XGBClassifier(
         n_estimators=n_estimators,
         learning_rate=learning_rate,
@@ -255,6 +273,12 @@ def train_xgboost(X_train, y_train, X_test, y_test, n_estimators=100, learning_r
 
 def train_random_forest(X_train, y_train, X_test, y_test, n_estimators=100, max_depth=10):
     """Train Random Forest model"""
+    # Validate parameters
+    if n_estimators < 1:
+        n_estimators = 100  # Default
+    if max_depth is not None and max_depth < 1:
+        max_depth = None  # Unlimited depth
+    
     model = RandomForestClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -303,6 +327,14 @@ def train_catboost(X_train, y_train, X_test, y_test, n_estimators=100, learning_
     """Train CatBoost model"""
     if not CATBOOST_AVAILABLE:
         return None, None
+    
+    # Validate parameters
+    if n_estimators < 1:
+        n_estimators = 100
+    if learning_rate <= 0:
+        learning_rate = 0.1
+    if max_depth < 1:
+        max_depth = 5
     
     model = cb.CatBoostClassifier(
         iterations=n_estimators,
@@ -622,6 +654,14 @@ def train_models(
 ):
     """Train all models with specified parameters"""
     global trained_models, best_model_name, model_metrics, X_test_global, y_test_global, feature_names, X_train_global, y_train_global
+    
+    # Validate and sanitize parameters
+    if n_estimators < 1:
+        n_estimators = 100
+    if learning_rate <= 0:
+        learning_rate = 0.1
+    if max_depth < 1:
+        max_depth = None  # Use None for unlimited depth in tree models
     
     # Load or generate data
     df = load_or_generate_data()
@@ -1020,23 +1060,45 @@ def predict(request: PredictionRequest, model_name: str = None):
     
     # Use specified model or best model
     model_key = model_name if model_name and model_name in trained_models else best_model_name
+    if model_key is None:
+        raise HTTPException(status_code=404, detail="No models available for prediction.")
+    
     model = trained_models[model_key]
     
-    # Convert features to numpy array
-    features = np.array(request.features).reshape(1, -1)
+    # Validate feature count
+    expected_features = len(feature_names) if feature_names else (X_test_global.shape[1] if X_test_global is not None else None)
+    if expected_features and len(request.features) != expected_features:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid number of features. Expected {expected_features}, got {len(request.features)}."
+        )
     
-    # Make prediction
-    prediction = model.predict(features)[0]
-    prediction_proba = model.predict_proba(features)[0]
-    
-    return {
-        "model_used": model_key,
-        "prediction": int(prediction),
-        "probability": {
-            "class_0": float(prediction_proba[0]),
-            "class_1": float(prediction_proba[1])
+    try:
+        # Convert features to numpy array
+        features = np.array(request.features, dtype=float).reshape(1, -1)
+        
+        # Make prediction
+        prediction = model.predict(features)[0]
+        prediction_proba = model.predict_proba(features)[0]
+        
+        return {
+            "model_used": model_key,
+            "prediction": int(prediction),
+            "probability": {
+                "class_0": float(prediction_proba[0]),
+                "class_1": float(prediction_proba[1])
+            }
         }
-    }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid feature values: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction error: {str(e)}"
+        )
 
 @app.get("/visualizations/confusion-matrix/{model_name}")
 def get_confusion_matrix(model_name: str):
@@ -1077,11 +1139,16 @@ def get_roc_curve(model_name: str):
     fpr, tpr, thresholds = roc_curve(y_test_global, y_pred_proba)
     auc = roc_auc_score(y_test_global, y_pred_proba)
     
+    # Clean infinity values from thresholds for JSON serialization
+    thresholds_clean = [float(t) if np.isfinite(t) else None for t in thresholds]
+    fpr_clean = [float(f) if np.isfinite(f) else 0.0 for f in fpr]
+    tpr_clean = [float(t) if np.isfinite(t) else 1.0 for t in tpr]
+    
     return {
         "model_name": model_name,
-        "fpr": fpr.tolist(),
-        "tpr": tpr.tolist(),
-        "thresholds": thresholds.tolist(),
+        "fpr": fpr_clean,
+        "tpr": tpr_clean,
+        "thresholds": thresholds_clean,
         "auc": float(auc)
     }
 
