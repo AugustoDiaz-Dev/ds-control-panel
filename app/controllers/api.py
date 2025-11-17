@@ -49,6 +49,28 @@ except Exception:
     OPTUNA_AVAILABLE = False
     optuna = None
 
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except Exception:
+    SHAP_AVAILABLE = False
+    shap = None
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend
+    import matplotlib.pyplot as plt
+    import io
+    import base64
+    MATPLOTLIB_AVAILABLE = True
+except Exception:
+    MATPLOTLIB_AVAILABLE = False
+    plt = None
+    io = None
+    base64 = None
+
+from sklearn.ensemble import VotingClassifier, StackingClassifier
+
 app = FastAPI(title="DS Control Panel API", version="1.0.0")
 
 # Enable CORS for notebook access
@@ -65,11 +87,13 @@ BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 MLFLOW_DIR = BASE_DIR / "mlruns"
+SHAP_PLOTS_DIR = BASE_DIR / "shap_plots"
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
 MODELS_DIR.mkdir(exist_ok=True)
 MLFLOW_DIR.mkdir(exist_ok=True)
+SHAP_PLOTS_DIR.mkdir(exist_ok=True)
 
 # Setup MLflow
 if MLFLOW_AVAILABLE:
@@ -100,6 +124,17 @@ class OptimizationResponse(BaseModel):
     best_metrics: ModelMetrics
     n_trials: int
 
+class EnsembleRequest(BaseModel):
+    ensemble_type: str  # "voting", "stacking", or "weighted"
+    model_names: list[str]  # List of model names to include
+    weights: list[float] = None  # Optional weights for weighted ensemble
+
+class EnsembleResponse(BaseModel):
+    message: str
+    ensemble_type: str
+    models_used: list[str]
+    metrics: ModelMetrics
+
 # Global variables
 trained_models = {}
 best_model_name = None
@@ -107,6 +142,10 @@ model_metrics = {}
 X_test_global = None
 y_test_global = None
 feature_names = None
+X_train_global = None
+y_train_global = None
+ensemble_models = {}  # Store ensemble models
+shap_values_cache = {}  # Cache SHAP values for models
 
 def load_or_generate_data():
     """Load existing dataset or generate a synthetic financial dataset"""
@@ -464,6 +503,88 @@ def optimize_catboost(X_train, y_train, X_test, y_test, n_trials=20):
     
     return best_model, best_metrics, best_params
 
+def calculate_shap_values(model, X_background, X_explain, model_name: str):
+    """Calculate SHAP values for a model"""
+    if not SHAP_AVAILABLE:
+        return None
+    
+    try:
+        # Convert to numpy if pandas DataFrame
+        if isinstance(X_background, pd.DataFrame):
+            X_background_np = X_background.values
+        else:
+            X_background_np = X_background
+        
+        if isinstance(X_explain, pd.DataFrame):
+            X_explain_np = X_explain.values
+        else:
+            X_explain_np = X_explain
+        
+        # Use TreeExplainer for tree-based models (LightGBM, XGBoost, RandomForest, etc.)
+        model_type = type(model).__name__.lower()
+        if any(x in model_type for x in ['lgbm', 'xgb', 'randomforest', 'extratrees', 'catboost']):
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_explain_np)
+        # Use KernelExplainer as fallback
+        else:
+            # Use a sample of background data for efficiency
+            sample_size = min(100, len(X_background_np))
+            indices = np.random.choice(len(X_background_np), sample_size, replace=False)
+            background_sample = X_background_np[indices]
+            explainer = shap.KernelExplainer(model.predict_proba, background_sample)
+            shap_values = explainer.shap_values(X_explain_np)
+        
+        # Handle multi-class output (SHAP returns list for multi-class)
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]  # Use class 1 (positive class)
+        
+        return shap_values
+    except Exception as e:
+        print(f"Error calculating SHAP values for {model_name}: {str(e)}")
+        return None
+
+def create_voting_ensemble(model_list, model_names):
+    """Create a voting ensemble from trained models"""
+    # Create list of (name, model) tuples for VotingClassifier
+    estimators = [(name, model) for name, model in zip(model_names, model_list)]
+    ensemble = VotingClassifier(estimators=estimators, voting='soft')
+    return ensemble
+
+def create_stacking_ensemble(model_list, model_names, X_train, y_train):
+    """Create a stacking ensemble from trained models"""
+    # Create list of (name, model) tuples for StackingClassifier
+    estimators = [(name, model) for name, model in zip(model_names, model_list)]
+    # Use RandomForest as final estimator
+    final_estimator = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
+    ensemble = StackingClassifier(
+        estimators=estimators,
+        final_estimator=final_estimator,
+        cv=5
+    )
+    ensemble.fit(X_train, y_train)
+    return ensemble
+
+def create_weighted_ensemble(model_list, weights):
+    """Create a weighted ensemble that combines predictions"""
+    class WeightedEnsemble:
+        def __init__(self, models, weights):
+            self.models = models
+            self.weights = np.array(weights) / np.sum(weights)  # Normalize weights
+        
+        def predict(self, X):
+            predictions = np.array([model.predict(X) for model in self.models])
+            # Weighted voting
+            weighted_pred = np.average(predictions, axis=0, weights=self.weights)
+            return (weighted_pred > 0.5).astype(int)
+        
+        def predict_proba(self, X):
+            probas = np.array([model.predict_proba(X) for model in self.models])
+            # Weighted average of probabilities
+            weighted_proba = np.average(probas, axis=0, weights=self.weights)
+            return weighted_proba
+    
+    return WeightedEnsemble(model_list, weights)
+
 @app.get("/")
 def root():
     endpoints = {
@@ -471,7 +592,12 @@ def root():
         "optimize": "/optimize",
         "predict": "/predict",
         "metrics": "/metrics",
-        "models": "/models"
+        "models": "/models",
+        "shap_values": "/shap/values/{model_name}",
+        "shap_explain": "/shap/explain/{model_name}",
+        "ensemble_train": "/ensemble/train",
+        "ensemble_list": "/ensemble/list",
+        "ensemble_predict": "/ensemble/predict"
     }
     if MLFLOW_AVAILABLE:
         endpoints.update({
@@ -483,7 +609,8 @@ def root():
         "message": "DS Control Panel API",
         "endpoints": endpoints,
         "mlflow_available": MLFLOW_AVAILABLE,
-        "optuna_available": OPTUNA_AVAILABLE
+        "optuna_available": OPTUNA_AVAILABLE,
+        "shap_available": SHAP_AVAILABLE
     }
 
 @app.post("/train", response_model=TrainingResponse)
@@ -494,15 +621,17 @@ def train_models(
     include_catboost: bool = False
 ):
     """Train all models with specified parameters"""
-    global trained_models, best_model_name, model_metrics, X_test_global, y_test_global, feature_names
+    global trained_models, best_model_name, model_metrics, X_test_global, y_test_global, feature_names, X_train_global, y_train_global
     
     # Load or generate data
     df = load_or_generate_data()
     X_train, X_test, y_train, y_test = prepare_data(df)
     
-    # Store test data globally for visualizations
+    # Store test and train data globally for visualizations and SHAP
     X_test_global = X_test
     y_test_global = y_test
+    X_train_global = X_train
+    y_train_global = y_train
     feature_names = list(X_test.columns)
     
     trained_models = {}
@@ -1067,6 +1196,345 @@ def get_all_visualizations(model_name: str):
         "feature_importance": {
             "features": feature_names if feature_names else [],
             "importances": importances if importances else []
+        }
+    }
+
+@app.get("/shap/values/{model_name}")
+def get_shap_values(model_name: str, sample_size: int = 100):
+    """Calculate and return SHAP values for a specific model"""
+    if not SHAP_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SHAP is not available. Please install shap.")
+    
+    if not trained_models:
+        raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
+    
+    if model_name not in trained_models:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found.")
+    
+    if X_train_global is None or X_test_global is None:
+        raise HTTPException(status_code=404, detail="Training/test data not available. Please train models first.")
+    
+    model = trained_models[model_name]
+    
+    # Use cached SHAP values if available
+    cache_key = f"{model_name}_{sample_size}"
+    if cache_key in shap_values_cache:
+        shap_values = shap_values_cache[cache_key]
+    else:
+        # Sample test data for efficiency
+        if len(X_test_global) > sample_size:
+            sample_indices = np.random.choice(len(X_test_global), sample_size, replace=False)
+            X_explain = X_test_global.iloc[sample_indices] if isinstance(X_test_global, pd.DataFrame) else X_test_global[sample_indices]
+        else:
+            X_explain = X_test_global
+        
+        # Calculate SHAP values
+        shap_values = calculate_shap_values(model, X_train_global, X_explain, model_name)
+        
+        if shap_values is None:
+            raise HTTPException(status_code=500, detail=f"Failed to calculate SHAP values for {model_name}")
+        
+        # Cache the values
+        shap_values_cache[cache_key] = shap_values
+    
+    # Convert to list for JSON serialization
+    if isinstance(shap_values, np.ndarray):
+        shap_values_list = shap_values.tolist()
+    else:
+        shap_values_list = shap_values
+    
+    # Get feature names
+    feature_list = feature_names if feature_names else [f"feature_{i}" for i in range(len(shap_values_list[0]))]
+    
+    # Calculate mean absolute SHAP values for feature importance
+    mean_shap = np.abs(shap_values).mean(axis=0) if isinstance(shap_values, np.ndarray) else np.abs(np.array(shap_values_list)).mean(axis=0)
+    
+    return {
+        "model_name": model_name,
+        "shap_values": shap_values_list,
+        "feature_names": feature_list,
+        "mean_abs_shap": mean_shap.tolist() if isinstance(mean_shap, np.ndarray) else mean_shap,
+        "sample_size": len(shap_values_list)
+    }
+
+@app.get("/shap/explain/{model_name}")
+def explain_prediction(model_name: str, features: str):
+    """Explain a single prediction using SHAP values"""
+    if not SHAP_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SHAP is not available. Please install shap.")
+    
+    if not trained_models:
+        raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
+    
+    if model_name not in trained_models:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found.")
+    
+    if X_train_global is None:
+        raise HTTPException(status_code=404, detail="Training data not available. Please train models first.")
+    
+    model = trained_models[model_name]
+    
+    # Parse features
+    try:
+        feature_list = [float(x.strip()) for x in features.split(',')]
+    except:
+        raise HTTPException(status_code=400, detail="Invalid features format. Use comma-separated values.")
+    
+    # Convert to DataFrame or numpy array
+    if isinstance(X_train_global, pd.DataFrame):
+        X_explain = pd.DataFrame([feature_list], columns=X_train_global.columns)
+    else:
+        X_explain = np.array([feature_list])
+    
+    # Calculate SHAP values for this single instance
+    shap_values = calculate_shap_values(model, X_train_global, X_explain, model_name)
+    
+    if shap_values is None:
+        raise HTTPException(status_code=500, detail=f"Failed to calculate SHAP values for {model_name}")
+    
+    # Get feature names
+    feature_list_names = feature_names if feature_names else [f"feature_{i}" for i in range(len(feature_list))]
+    
+    # Flatten SHAP values for single instance
+    # SHAP returns shape (1, n_features) for single instance, or (n_features,) if already flattened
+    if isinstance(shap_values, np.ndarray):
+        if len(shap_values.shape) == 2:
+            # Shape is (1, n_features) - take first row
+            shap_list = shap_values[0].tolist()
+        elif len(shap_values.shape) == 1:
+            # Already flattened
+            shap_list = shap_values.tolist()
+        else:
+            # Unexpected shape, try to flatten
+            shap_list = shap_values.flatten().tolist()
+    elif isinstance(shap_values, list):
+        # If it's a list, it might be nested
+        if len(shap_values) > 0 and isinstance(shap_values[0], (list, np.ndarray)):
+            shap_list = shap_values[0] if isinstance(shap_values[0], list) else shap_values[0].tolist()
+        else:
+            shap_list = shap_values
+    else:
+        shap_list = list(shap_values) if hasattr(shap_values, '__iter__') else [shap_values]
+    
+    # Get prediction
+    prediction = model.predict(X_explain)[0]
+    prediction_proba = model.predict_proba(X_explain)[0]
+    
+    # Create feature contribution list
+    contributions = [
+        {"feature": name, "value": val, "shap_value": shap_val}
+        for name, val, shap_val in zip(feature_list_names, feature_list, shap_list)
+    ]
+    contributions.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+    
+    return {
+        "model_name": model_name,
+        "prediction": int(prediction),
+        "probability": {
+            "class_0": float(prediction_proba[0]),
+            "class_1": float(prediction_proba[1])
+        },
+        "feature_contributions": contributions,
+        "base_value": float(model.predict_proba(X_train_global).mean(axis=0)[1])  # Average prediction
+    }
+
+@app.get("/shap/plot/{model_name}")
+def get_shap_summary_plot(model_name: str, sample_size: int = 100):
+    """Generate SHAP summary plot (matplotlib style) and return as base64 image"""
+    if not SHAP_AVAILABLE or not MATPLOTLIB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SHAP or matplotlib is not available.")
+    
+    if not trained_models:
+        raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
+    
+    if model_name not in trained_models:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found.")
+    
+    if X_train_global is None or X_test_global is None:
+        raise HTTPException(status_code=404, detail="Training/test data not available. Please train models first.")
+    
+    model = trained_models[model_name]
+    
+    # Sample test data for efficiency
+    if len(X_test_global) > sample_size:
+        sample_indices = np.random.choice(len(X_test_global), sample_size, replace=False)
+        X_explain = X_test_global.iloc[sample_indices] if isinstance(X_test_global, pd.DataFrame) else X_test_global[sample_indices]
+    else:
+        X_explain = X_test_global
+    
+    try:
+        # Convert to numpy if pandas DataFrame
+        if isinstance(X_train_global, pd.DataFrame):
+            X_train_np = X_train_global.values
+        else:
+            X_train_np = X_train_global
+        
+        if isinstance(X_explain, pd.DataFrame):
+            X_explain_np = X_explain.values
+            feature_names_list = list(X_explain.columns)
+        else:
+            X_explain_np = X_explain
+            feature_names_list = feature_names if feature_names else [f"feature_{i}" for i in range(X_explain_np.shape[1])]
+        
+        # Create SHAP explainer
+        model_type = type(model).__name__.lower()
+        if any(x in model_type for x in ['lgbm', 'xgb', 'randomforest', 'extratrees', 'catboost']):
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_explain_np)
+        else:
+            sample_size_bg = min(100, len(X_train_np))
+            indices = np.random.choice(len(X_train_np), sample_size_bg, replace=False)
+            background_sample = X_train_np[indices]
+            explainer = shap.KernelExplainer(model.predict_proba, background_sample)
+            shap_values = explainer.shap_values(X_explain_np)
+        
+        # Handle multi-class output
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]  # Use class 1 (positive class)
+        
+        # Create SHAP summary plot
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(
+            shap_values, 
+            X_explain_np,
+            feature_names=feature_names_list,
+            show=False,
+            plot_type="dot"
+        )
+        plt.tight_layout()
+        
+        # Convert to base64
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight', facecolor='white')
+        img_buffer.seek(0)
+        img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
+        plt.close()
+        
+        return {
+            "model_name": model_name,
+            "image": f"data:image/png;base64,{img_base64}",
+            "sample_size": len(X_explain_np)
+        }
+    except Exception as e:
+        plt.close()
+        raise HTTPException(status_code=500, detail=f"Error generating SHAP plot: {str(e)}")
+
+@app.post("/ensemble/train", response_model=EnsembleResponse)
+def train_ensemble(request: EnsembleRequest):
+    """Train an ensemble model using specified models"""
+    global ensemble_models, X_train_global, y_train_global, X_test_global, y_test_global
+    
+    if not trained_models:
+        raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
+    
+    if X_train_global is None or y_train_global is None or X_test_global is None or y_test_global is None:
+        raise HTTPException(status_code=404, detail="Training/test data not available. Please train models first.")
+    
+    # Validate model names
+    invalid_models = [name for name in request.model_names if name not in trained_models]
+    if invalid_models:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model names: {invalid_models}. Available models: {list(trained_models.keys())}"
+        )
+    
+    # Get models
+    model_list = [trained_models[name] for name in request.model_names]
+    
+    # Create ensemble based on type
+    ensemble_type = request.ensemble_type.lower()
+    ensemble_name = f"{ensemble_type}_ensemble"
+    
+    if ensemble_type == "voting":
+        ensemble = create_voting_ensemble(model_list, request.model_names)
+        # VotingClassifier needs to be fitted
+        ensemble.fit(X_train_global, y_train_global)
+    elif ensemble_type == "stacking":
+        ensemble = create_stacking_ensemble(model_list, request.model_names, X_train_global, y_train_global)
+    elif ensemble_type == "weighted":
+        if request.weights is None:
+            # Use equal weights if not provided
+            weights = [1.0 / len(model_list)] * len(model_list)
+        else:
+            if len(request.weights) != len(model_list):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Number of weights ({len(request.weights)}) must match number of models ({len(model_list)})"
+                )
+            weights = request.weights
+        ensemble = create_weighted_ensemble(model_list, weights)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid ensemble type: {ensemble_type}. Must be 'voting', 'stacking', or 'weighted'"
+        )
+    
+    # Evaluate ensemble
+    y_pred = ensemble.predict(X_test_global)
+    y_pred_proba = ensemble.predict_proba(X_test_global)[:, 1]
+    
+    metrics = {
+        'accuracy': accuracy_score(y_test_global, y_pred),
+        'precision': precision_score(y_test_global, y_pred, zero_division=0),
+        'recall': recall_score(y_test_global, y_pred),
+        'f1_score': f1_score(y_test_global, y_pred),
+        'auc': roc_auc_score(y_test_global, y_pred_proba)
+    }
+    
+    # Store ensemble
+    ensemble_models[ensemble_name] = ensemble
+    
+    # Log to MLflow if available
+    if MLFLOW_AVAILABLE:
+        with mlflow.start_run(run_name=f"ensemble_{ensemble_type}"):
+            mlflow.log_param("ensemble_type", ensemble_type)
+            mlflow.log_param("models_used", ",".join(request.model_names))
+            mlflow.log_metrics({f"ensemble_{k}": v for k, v in metrics.items()})
+            mlflow.sklearn.log_model(ensemble, "ensemble_model")
+    
+    # Save ensemble
+    ensemble_path = MODELS_DIR / f"{ensemble_name}.pkl"
+    joblib.dump(ensemble, ensemble_path)
+    
+    return EnsembleResponse(
+        message=f"{ensemble_type.capitalize()} ensemble trained successfully",
+        ensemble_type=ensemble_type,
+        models_used=request.model_names,
+        metrics=ModelMetrics(model_name=ensemble_name, **metrics)
+    )
+
+@app.get("/ensemble/list")
+def list_ensembles():
+    """List all trained ensemble models"""
+    return {
+        "ensembles": list(ensemble_models.keys()),
+        "count": len(ensemble_models)
+    }
+
+@app.post("/ensemble/predict")
+def predict_ensemble(request: PredictionRequest, ensemble_name: str):
+    """Make prediction using an ensemble model"""
+    if ensemble_name not in ensemble_models:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Ensemble '{ensemble_name}' not found. Available ensembles: {list(ensemble_models.keys())}"
+        )
+    
+    ensemble = ensemble_models[ensemble_name]
+    
+    # Convert features to numpy array
+    features = np.array(request.features).reshape(1, -1)
+    
+    # Make prediction
+    prediction = ensemble.predict(features)[0]
+    prediction_proba = ensemble.predict_proba(features)[0]
+    
+    return {
+        "ensemble_used": ensemble_name,
+        "prediction": int(prediction),
+        "probability": {
+            "class_0": float(prediction_proba[0]),
+            "class_1": float(prediction_proba[1])
         }
     }
 

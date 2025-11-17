@@ -11,6 +11,8 @@ An interactive Data Science control panel for real-time experimentation with a F
 - **Prediction API**: Make predictions using trained models
 - **MLflow Integration**: Experiment tracking, model versioning, and performance comparison
 - **Hyperparameter Optimization**: Automated tuning using Optuna
+- **SHAP Values**: Model interpretability with SHAP (SHapley Additive exPlanations) values
+- **Model Ensembles**: Voting, Stacking, and Weighted ensemble methods
 - **Docker Support**: Containerized deployment with Docker Compose
 - **Interactive Dashboard**: Real-time visualizations (ROC curves, confusion matrices, feature importance)
 - **Comprehensive Testing**: Unit, integration, and model validation tests
@@ -83,6 +85,7 @@ python -m http.server 8080
 
 ## API Endpoints
 
+### Core Endpoints
 - `GET /` - API information
 - `POST /train` - Train all models
 - `POST /optimize` - Optimize hyperparameters
@@ -91,7 +94,43 @@ python -m http.server 8080
 - `POST /predict` - Make predictions
 - `GET /visualizations/*` - Get visualization data
 
+### SHAP Interpretability
+- `GET /shap/values/{model_name}` - Calculate SHAP values for a model (with optional `sample_size` parameter)
+- `GET /shap/explain/{model_name}` - Explain a single prediction using SHAP values (requires `features` query parameter)
+
+### Model Ensembles
+- `POST /ensemble/train` - Train an ensemble model (voting, stacking, or weighted)
+- `GET /ensemble/list` - List all trained ensemble models
+- `POST /ensemble/predict` - Make predictions using an ensemble model
+
+### MLflow Integration
+- `GET /mlflow/experiments` - List MLflow experiments
+- `GET /mlflow/runs` - List MLflow runs
+
 See API documentation at `http://localhost:8000/docs`
+
+### Example: Training an Ensemble
+
+```bash
+curl -X POST "http://localhost:8000/ensemble/train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ensemble_type": "voting",
+    "model_names": ["random_forest", "xgboost", "lightgbm"]
+  }'
+```
+
+### Example: Getting SHAP Values
+
+```bash
+curl "http://localhost:8000/shap/values/random_forest?sample_size=100"
+```
+
+### Example: Explaining a Prediction
+
+```bash
+curl "http://localhost:8000/shap/explain/random_forest?features=750,80000,15000,35,60000,8,25000"
+```
 
 ## Testing
 

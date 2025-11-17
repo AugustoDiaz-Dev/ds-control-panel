@@ -364,6 +364,78 @@
                     <canvas id="featureImportanceChart"></canvas>
                 </div>
             </div>
+
+            <!-- SHAP Values Summary Plot (Matplotlib Style) -->
+            <div class="card full-width">
+                <h2>🔍 SHAP Summary Plot</h2>
+                <div class="model-selector" id="shapPlotModelSelector"></div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="color: var(--text-secondary); font-size: 0.9rem;">Sample Size: </label>
+                    <input type="number" id="shapPlotSampleSize" value="100" min="10" max="200" style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); width: 80px; margin-left: 0.5rem;">
+                    <button class="btn" onclick="loadSHAPPlot()" style="margin-left: 1rem; padding: 0.5rem 1rem;">
+                        <span class="material-icons" style="font-size: 18px;">refresh</span>
+                        Generate SHAP Plot
+                    </button>
+                </div>
+                <div id="shapPlotContainer" style="text-align: center; padding: 1rem;">
+                    <p style="color: var(--text-secondary);">Click "Generate SHAP Plot" to create the visualization</p>
+                </div>
+            </div>
+
+            <!-- SHAP Values Summary (Bar Chart) -->
+            <div class="card full-width">
+                <h2>📊 SHAP Values Summary (Bar Chart)</h2>
+                <div class="model-selector" id="shapModelSelector"></div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="color: var(--text-secondary); font-size: 0.9rem;">Sample Size: </label>
+                    <input type="number" id="shapSampleSize" value="50" min="10" max="200" style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); width: 80px; margin-left: 0.5rem;">
+                    <button class="btn" onclick="loadSHAP()" style="margin-left: 1rem; padding: 0.5rem 1rem;">
+                        <span class="material-icons" style="font-size: 18px;">refresh</span>
+                        Load SHAP Values
+                    </button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="shapSummaryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- SHAP Individual Prediction Explanation -->
+            <div class="card full-width">
+                <h2>💡 SHAP Prediction Explanation</h2>
+                <div class="model-selector" id="shapExplainModelSelector"></div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="color: var(--text-secondary); font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Enter feature values (comma-separated):</label>
+                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="shapFeaturesInput" placeholder="750,80000,15000,35,60000,8,25000" style="flex: 1; min-width: 300px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary);">
+                        <button class="btn" onclick="explainPrediction()">
+                            <span class="material-icons" style="font-size: 18px;">insights</span>
+                            Explain Prediction
+                        </button>
+                    </div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;">Format: credit_score, income, debt, age, loan_amount, employment_years, savings</p>
+                </div>
+                <div id="shapExplanationResult" style="display: none;">
+                    <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 12px; margin-bottom: 1rem; border: 1px solid var(--border);">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                            <div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">Prediction</div>
+                                <div id="shapPrediction" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);"></div>
+                            </div>
+                            <div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">Probability (Class 1)</div>
+                                <div id="shapProbability" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);"></div>
+                            </div>
+                            <div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">Base Value</div>
+                                <div id="shapBaseValue" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="shapExplanationChart"></canvas>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -373,6 +445,8 @@
         let rocChart = null;
         let confusionMatrixChart = null;
         let featureImportanceChart = null;
+        let shapSummaryChart = null;
+        let shapExplanationChart = null;
         let availableModels = [];
         let selectedModel = null;
 
@@ -410,11 +484,20 @@
             Chart.defaults.borderColor = gridColor;
             
             // Update existing charts
-            [comparisonChart, rocChart, confusionMatrixChart, featureImportanceChart].forEach(chart => {
+            [comparisonChart, rocChart, confusionMatrixChart, featureImportanceChart, shapSummaryChart, shapExplanationChart].forEach(chart => {
                 if (chart) {
                     chart.options.scales = chart.options.scales || {};
-                    if (chart.options.scales.x) chart.options.scales.x.grid.color = gridColor;
-                    if (chart.options.scales.y) chart.options.scales.y.grid.color = gridColor;
+                    if (chart.options.scales.x) {
+                        chart.options.scales.x.grid.color = gridColor;
+                        if (chart.options.scales.x.ticks) chart.options.scales.x.ticks.color = textColor;
+                    }
+                    if (chart.options.scales.y) {
+                        chart.options.scales.y.grid.color = gridColor;
+                        if (chart.options.scales.y.ticks) chart.options.scales.y.ticks.color = textColor;
+                    }
+                    if (chart.options.plugins?.title) {
+                        chart.options.plugins.title.color = textColor;
+                    }
                     chart.update();
                 }
             });
@@ -628,9 +711,10 @@
         }
 
         function initializeModelSelectors() {
-            const selectors = ['metricsModelSelector', 'rocModelSelector', 'cmModelSelector', 'fiModelSelector'];
+            const selectors = ['metricsModelSelector', 'rocModelSelector', 'cmModelSelector', 'fiModelSelector', 'shapModelSelector', 'shapPlotModelSelector', 'shapExplainModelSelector'];
             selectors.forEach(selectorId => {
                 const selector = document.getElementById(selectorId);
+                if (!selector) return;
                 selector.innerHTML = '';
                 availableModels.forEach(model => {
                     const btn = document.createElement('button');
@@ -640,7 +724,15 @@
                         selectedModel = model;
                         document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
-                        loadAllVisualizations();
+                        if (selectorId.includes('shap')) {
+                            if (selectorId === 'shapModelSelector') {
+                                loadSHAP();
+                            } else if (selectorId === 'shapPlotModelSelector') {
+                                loadSHAPPlot();
+                            }
+                        } else {
+                            loadAllVisualizations();
+                        }
                     };
                     selector.appendChild(btn);
                 });
@@ -958,6 +1050,271 @@
                 });
             } catch (error) {
                 console.error('Error loading feature importance:', error);
+            }
+        }
+
+        // Load SHAP summary plot (matplotlib style)
+        async function loadSHAPPlot() {
+            if (!selectedModel) return;
+            
+            const sampleSize = parseInt(document.getElementById('shapPlotSampleSize').value) || 100;
+            const selector = document.getElementById('shapPlotModelSelector');
+            const activeBtn = selector?.querySelector('.active');
+            const modelName = activeBtn?.textContent || selectedModel;
+            const container = document.getElementById('shapPlotContainer');
+            
+            container.innerHTML = '<p style="color: var(--text-secondary);">Generating SHAP plot...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/shap/plot/${modelName}?sample_size=${sampleSize}`);
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to load SHAP plot');
+                }
+                
+                const data = await response.json();
+                
+                container.innerHTML = `
+                    <div style="background: white; padding: 1rem; border-radius: 12px; border: 1px solid var(--border);">
+                        <img src="${data.image}" alt="SHAP Summary Plot" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem; text-align: center;">
+                            Sample size: ${data.sample_size} instances
+                        </p>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading SHAP plot:', error);
+                container.innerHTML = `<p style="color: #f44336;">Error: ${error.message}</p>`;
+            }
+        }
+
+        // Load SHAP summary values
+        async function loadSHAP() {
+            if (!selectedModel) return;
+            
+            const sampleSize = parseInt(document.getElementById('shapSampleSize').value) || 50;
+            const selector = document.getElementById('shapModelSelector');
+            const activeBtn = selector?.querySelector('.active');
+            const modelName = activeBtn?.textContent || selectedModel;
+            
+            try {
+                const response = await fetch(`${API_BASE}/shap/values/${modelName}?sample_size=${sampleSize}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load SHAP values');
+                }
+                
+                const data = await response.json();
+                const featureNames = data.feature_names || [];
+                const meanShap = data.mean_abs_shap || [];
+                
+                // Handle nested arrays (SHAP returns values for both classes sometimes)
+                let meanShapFlat = meanShap;
+                if (Array.isArray(meanShap[0])) {
+                    meanShapFlat = meanShap.map(arr => Array.isArray(arr) ? Math.abs(arr[1] || arr[0]) : Math.abs(arr));
+                } else {
+                    meanShapFlat = meanShap.map(v => Math.abs(v));
+                }
+                
+                // Sort by importance
+                const sorted = featureNames.map((f, i) => ({feature: f, importance: meanShapFlat[i]}))
+                    .sort((a, b) => b.importance - a.importance);
+                
+                const ctx = document.getElementById('shapSummaryChart').getContext('2d');
+                if (shapSummaryChart) shapSummaryChart.destroy();
+                
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                const barColor = isDark ? 'rgba(75, 192, 192, 0.8)' : 'rgba(75, 192, 192, 0.6)';
+                const borderColor = isDark ? 'rgba(75, 192, 192, 1)' : 'rgba(75, 192, 192, 1)';
+                
+                shapSummaryChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: sorted.map(s => s.feature),
+                        datasets: [{
+                            label: 'Mean |SHAP Value|',
+                            data: sorted.map(s => s.importance),
+                            backgroundColor: barColor,
+                            borderColor: borderColor,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: `SHAP Values Summary (${data.sample_size} samples)`,
+                                color: isDark ? '#ffffff' : '#1a1a1a'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return `Mean |SHAP|: ${context.parsed.x.toFixed(4)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Mean Absolute SHAP Value',
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                },
+                                grid: {
+                                    color: isDark ? '#333333' : '#e0e0e0'
+                                },
+                                ticks: {
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Features',
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                },
+                                grid: {
+                                    color: isDark ? '#333333' : '#e0e0e0'
+                                },
+                                ticks: {
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading SHAP values:', error);
+                const ctx = document.getElementById('shapSummaryChart').getContext('2d');
+                if (shapSummaryChart) shapSummaryChart.destroy();
+                ctx.fillStyle = '#666';
+                ctx.font = '16px Inter';
+                ctx.fillText('Error loading SHAP values. Make sure SHAP is available and models are trained.', 10, 50);
+            }
+        }
+
+        // Explain individual prediction
+        async function explainPrediction() {
+            const selector = document.getElementById('shapExplainModelSelector');
+            const activeBtn = selector?.querySelector('.active');
+            const modelName = activeBtn?.textContent || selectedModel;
+            const featuresInput = document.getElementById('shapFeaturesInput').value.trim();
+            
+            if (!featuresInput) {
+                alert('Please enter feature values');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/shap/explain/${modelName}?features=${encodeURIComponent(featuresInput)}`);
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to explain prediction');
+                }
+                
+                const data = await response.json();
+                
+                // Update prediction info
+                document.getElementById('shapPrediction').textContent = data.prediction === 1 ? 'Good Credit' : 'Bad Credit';
+                document.getElementById('shapProbability').textContent = (data.probability.class_1 * 100).toFixed(2) + '%';
+                document.getElementById('shapBaseValue').textContent = (data.base_value * 100).toFixed(2) + '%';
+                document.getElementById('shapExplanationResult').style.display = 'block';
+                
+                // Create waterfall-style chart
+                const contributions = data.feature_contributions || [];
+                const ctx = document.getElementById('shapExplanationChart').getContext('2d');
+                if (shapExplanationChart) shapExplanationChart.destroy();
+                
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                
+                // Prepare data for waterfall visualization
+                const labels = contributions.map(c => c.feature);
+                const shapValues = contributions.map(c => c.shap_value);
+                const colors = shapValues.map(v => v >= 0 
+                    ? (isDark ? 'rgba(75, 192, 192, 0.8)' : 'rgba(75, 192, 192, 0.6)')
+                    : (isDark ? 'rgba(255, 99, 132, 0.8)' : 'rgba(255, 99, 132, 0.6)'));
+                const borderColors = shapValues.map(v => v >= 0 
+                    ? 'rgba(75, 192, 192, 1)'
+                    : 'rgba(255, 99, 132, 1)');
+                
+                shapExplanationChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'SHAP Value',
+                            data: shapValues,
+                            backgroundColor: colors,
+                            borderColor: borderColors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Feature Contributions to Prediction',
+                                color: isDark ? '#ffffff' : '#1a1a1a'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const contribution = contributions[context.dataIndex];
+                                        return [
+                                            `Feature: ${contribution.feature}`,
+                                            `Value: ${contribution.value}`,
+                                            `SHAP: ${contribution.shap_value.toFixed(4)}`
+                                        ];
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'SHAP Value',
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                },
+                                grid: {
+                                    color: isDark ? '#333333' : '#e0e0e0'
+                                },
+                                ticks: {
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Features',
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                },
+                                grid: {
+                                    color: isDark ? '#333333' : '#e0e0e0'
+                                },
+                                ticks: {
+                                    color: isDark ? '#b0b0b0' : '#666666'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error explaining prediction:', error);
+                alert('Error: ' + error.message);
             }
         }
 
