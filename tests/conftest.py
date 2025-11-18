@@ -67,6 +67,8 @@ def reset_global_state():
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app"""
+    # TestClient should work with app as positional argument
+    # This is the standard way for FastAPI
     return TestClient(app)
 
 @pytest.fixture

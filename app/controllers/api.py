@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -88,6 +90,7 @@ DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 MLFLOW_DIR = BASE_DIR / "mlruns"
 SHAP_PLOTS_DIR = BASE_DIR / "shap_plots"
+VIEWS_DIR = BASE_DIR / "app" / "views"
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
@@ -617,6 +620,30 @@ def create_weighted_ensemble(model_list, weights):
     
     return WeightedEnsemble(model_list, weights)
 
+# Mount static files for frontend
+if VIEWS_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(VIEWS_DIR)), name="static")
+
+@app.get("/dashboard")
+@app.get("/dashboard.html")
+def dashboard():
+    """Serve the dashboard HTML page"""
+    if VIEWS_DIR.exists():
+        dashboard_path = VIEWS_DIR / "dashboard.html"
+        if dashboard_path.exists():
+            return FileResponse(dashboard_path)
+    raise HTTPException(status_code=404, detail="Dashboard not found")
+
+@app.get("/index")
+@app.get("/index.html")
+def index():
+    """Serve the index HTML page"""
+    if VIEWS_DIR.exists():
+        index_path = VIEWS_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail="Index page not found")
+
 @app.get("/")
 def root():
     endpoints = {
@@ -629,6 +656,9 @@ def root():
         "shap_explain": "/shap/explain/{model_name}",
         "ensemble_train": "/ensemble/train",
         "ensemble_list": "/ensemble/list",
+        "ensemble_load": "/ensemble/load",
+        "ensemble_metrics": "/ensemble/metrics/{ensemble_name}",
+        "ensemble_compare": "/ensemble/compare",
         "ensemble_predict": "/ensemble/predict"
     }
     if MLFLOW_AVAILABLE:
@@ -1573,37 +1603,232 @@ def train_ensemble(request: EnsembleRequest):
 @app.get("/ensemble/list")
 def list_ensembles():
     """List all trained ensemble models"""
+    # Check for saved ensemble models on disk
+    saved_ensembles = []
+    for pkl_file in MODELS_DIR.glob("*_ensemble.pkl"):
+        ensemble_name = pkl_file.stem
+        if ensemble_name not in ensemble_models:
+            saved_ensembles.append(ensemble_name)
+    
     return {
         "ensembles": list(ensemble_models.keys()),
-        "count": len(ensemble_models)
+        "saved_ensembles": saved_ensembles,
+        "count": len(ensemble_models),
+        "total_saved": len(saved_ensembles)
     }
+
+@app.post("/ensemble/load")
+def load_ensemble(ensemble_name: str):
+    """Load a saved ensemble model from disk
+    
+    Args:
+        ensemble_name: Name of the ensemble to load (query parameter)
+    """
+    global ensemble_models
+    
+    ensemble_path = MODELS_DIR / f"{ensemble_name}.pkl"
+    
+    if not ensemble_path.exists():
+        available = [f.stem for f in MODELS_DIR.glob("*_ensemble.pkl")]
+        raise HTTPException(
+            status_code=404,
+            detail=f"Ensemble '{ensemble_name}' not found on disk. Available saved ensembles: {available}"
+        )
+    
+    try:
+        ensemble = joblib.load(ensemble_path)
+        ensemble_models[ensemble_name] = ensemble
+        
+        return {
+            "message": f"Ensemble '{ensemble_name}' loaded successfully",
+            "ensemble_name": ensemble_name,
+            "loaded_ensembles": list(ensemble_models.keys())
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error loading ensemble: {str(e)}"
+        )
+
+@app.get("/ensemble/metrics/{ensemble_name}")
+def get_ensemble_metrics(ensemble_name: str):
+    """Get metrics for a specific ensemble model"""
+    if ensemble_name not in ensemble_models:
+        # Try to load from disk
+        ensemble_path = MODELS_DIR / f"{ensemble_name}.pkl"
+        if ensemble_path.exists():
+            try:
+                ensemble = joblib.load(ensemble_path)
+                ensemble_models[ensemble_name] = ensemble
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error loading ensemble: {str(e)}"
+                )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Ensemble '{ensemble_name}' not found. Available ensembles: {list(ensemble_models.keys())}"
+            )
+    
+    if X_test_global is None or y_test_global is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Test data not available. Please train models first."
+        )
+    
+    ensemble = ensemble_models[ensemble_name]
+    y_pred = ensemble.predict(X_test_global)
+    y_pred_proba = ensemble.predict_proba(X_test_global)[:, 1]
+    
+    metrics = {
+        'accuracy': accuracy_score(y_test_global, y_pred),
+        'precision': precision_score(y_test_global, y_pred, zero_division=0),
+        'recall': recall_score(y_test_global, y_pred),
+        'f1_score': f1_score(y_test_global, y_pred),
+        'auc': roc_auc_score(y_test_global, y_pred_proba)
+    }
+    
+    return {
+        "ensemble_name": ensemble_name,
+        "metrics": metrics
+    }
+
+@app.get("/ensemble/compare")
+def compare_ensemble_vs_individual():
+    """Compare ensemble metrics with individual model metrics"""
+    if not ensemble_models:
+        raise HTTPException(
+            status_code=404,
+            detail="No ensembles trained. Train an ensemble first using /ensemble/train"
+        )
+    
+    if not model_metrics:
+        raise HTTPException(
+            status_code=404,
+            detail="No individual models trained. Train models first using /train"
+        )
+    
+    if X_test_global is None or y_test_global is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Test data not available. Please train models first."
+        )
+    
+    comparison = {
+        "individual_models": {},
+        "ensembles": {},
+        "best_individual": None,
+        "best_ensemble": None
+    }
+    
+    # Get individual model metrics
+    for model_name, metrics in model_metrics.items():
+        comparison["individual_models"][model_name] = metrics
+    
+    # Get ensemble metrics
+    for ensemble_name, ensemble in ensemble_models.items():
+        y_pred = ensemble.predict(X_test_global)
+        y_pred_proba = ensemble.predict_proba(X_test_global)[:, 1]
+        
+        metrics = {
+            'accuracy': accuracy_score(y_test_global, y_pred),
+            'precision': precision_score(y_test_global, y_pred, zero_division=0),
+            'recall': recall_score(y_test_global, y_pred),
+            'f1_score': f1_score(y_test_global, y_pred),
+            'auc': roc_auc_score(y_test_global, y_pred_proba)
+        }
+        comparison["ensembles"][ensemble_name] = metrics
+    
+    # Find best individual model (by AUC)
+    if comparison["individual_models"]:
+        best_individual = max(
+            comparison["individual_models"].items(),
+            key=lambda x: x[1]['auc']
+        )
+        comparison["best_individual"] = {
+            "model_name": best_individual[0],
+            "auc": best_individual[1]['auc']
+        }
+    
+    # Find best ensemble (by AUC)
+    if comparison["ensembles"]:
+        best_ensemble = max(
+            comparison["ensembles"].items(),
+            key=lambda x: x[1]['auc']
+        )
+        comparison["best_ensemble"] = {
+            "ensemble_name": best_ensemble[0],
+            "auc": best_ensemble[1]['auc']
+        }
+    
+    # Calculate improvement
+    if comparison["best_individual"] and comparison["best_ensemble"]:
+        improvement = comparison["best_ensemble"]["auc"] - comparison["best_individual"]["auc"]
+        comparison["improvement"] = {
+            "auc_improvement": improvement,
+            "percent_improvement": (improvement / comparison["best_individual"]["auc"]) * 100 if comparison["best_individual"]["auc"] > 0 else 0
+        }
+    
+    return comparison
 
 @app.post("/ensemble/predict")
 def predict_ensemble(request: PredictionRequest, ensemble_name: str):
     """Make prediction using an ensemble model"""
     if ensemble_name not in ensemble_models:
-        raise HTTPException(
+        # Try to load from disk
+        ensemble_path = MODELS_DIR / f"{ensemble_name}.pkl"
+        if ensemble_path.exists():
+            try:
+                ensemble = joblib.load(ensemble_path)
+                ensemble_models[ensemble_name] = ensemble
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error loading ensemble: {str(e)}"
+                )
+        else:
+            raise HTTPException(
             status_code=404,
             detail=f"Ensemble '{ensemble_name}' not found. Available ensembles: {list(ensemble_models.keys())}"
         )
     
     ensemble = ensemble_models[ensemble_name]
     
-    # Convert features to numpy array
-    features = np.array(request.features).reshape(1, -1)
+    # Validate feature count
+    expected_features = len(feature_names) if feature_names else (X_test_global.shape[1] if X_test_global is not None else None)
+    if expected_features and len(request.features) != expected_features:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid number of features. Expected {expected_features}, got {len(request.features)}."
+        )
     
-    # Make prediction
-    prediction = ensemble.predict(features)[0]
-    prediction_proba = ensemble.predict_proba(features)[0]
-    
-    return {
-        "ensemble_used": ensemble_name,
-        "prediction": int(prediction),
-        "probability": {
-            "class_0": float(prediction_proba[0]),
-            "class_1": float(prediction_proba[1])
+    try:
+        # Convert features to numpy array
+        features = np.array(request.features, dtype=float).reshape(1, -1)
+        
+        # Make prediction
+        prediction = ensemble.predict(features)[0]
+        prediction_proba = ensemble.predict_proba(features)[0]
+        
+        return {
+            "ensemble_used": ensemble_name,
+            "prediction": int(prediction),
+            "probability": {
+                "class_0": float(prediction_proba[0]),
+                "class_1": float(prediction_proba[1])
+            }
         }
-    }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid feature values: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction error: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
