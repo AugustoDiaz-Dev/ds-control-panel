@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# User data (should not be committed)
+users.json
+
 # Virtual environments
 venv/
 env/
