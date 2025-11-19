@@ -8,26 +8,26 @@ from fastapi import status
 class TestEnsembleTrainEndpoint:
     """Tests for the /ensemble/train endpoint"""
     
-    def test_ensemble_train_without_models(self, client):
+    def test_ensemble_train_without_models(self, authenticated_client):
         """Test ensemble training fails when no models are trained"""
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "No models trained" in response.json()["detail"]
     
-    def test_ensemble_train_voting(self, client, sample_training_params):
+    def test_ensemble_train_voting(self, authenticated_client, sample_training_params):
         """Test voting ensemble training"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "message" in data
@@ -38,120 +38,120 @@ class TestEnsembleTrainEndpoint:
         assert "accuracy" in data["metrics"]
         assert "auc" in data["metrics"]
     
-    def test_ensemble_train_stacking(self, client, sample_training_params):
+    def test_ensemble_train_stacking(self, authenticated_client, sample_training_params):
         """Test stacking ensemble training"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "stacking",
             "model_names": ["random_forest", "extra_trees"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["ensemble_type"] == "stacking"
         assert "metrics" in data
     
-    def test_ensemble_train_weighted(self, client, sample_training_params):
+    def test_ensemble_train_weighted(self, authenticated_client, sample_training_params):
         """Test weighted ensemble training"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "weighted",
             "model_names": ["random_forest", "extra_trees"],
             "weights": [0.6, 0.4]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["ensemble_type"] == "weighted"
         assert "metrics" in data
     
-    def test_ensemble_train_weighted_equal_weights(self, client, sample_training_params):
+    def test_ensemble_train_weighted_equal_weights(self, authenticated_client, sample_training_params):
         """Test weighted ensemble with equal weights (auto-assigned)"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "weighted",
             "model_names": ["random_forest", "extra_trees"]
             # weights not provided, should use equal weights
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["ensemble_type"] == "weighted"
     
-    def test_ensemble_train_invalid_model_names(self, client, sample_training_params):
+    def test_ensemble_train_invalid_model_names(self, authenticated_client, sample_training_params):
         """Test ensemble training with invalid model names"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "invalid_model"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid model names" in response.json()["detail"]
     
-    def test_ensemble_train_invalid_type(self, client, sample_training_params):
+    def test_ensemble_train_invalid_type(self, authenticated_client, sample_training_params):
         """Test ensemble training with invalid ensemble type"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "invalid_type",
             "model_names": ["random_forest", "extra_trees"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid ensemble type" in response.json()["detail"]
     
-    def test_ensemble_train_weighted_mismatched_weights(self, client, sample_training_params):
+    def test_ensemble_train_weighted_mismatched_weights(self, authenticated_client, sample_training_params):
         """Test weighted ensemble with mismatched weights count"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "weighted",
             "model_names": ["random_forest", "extra_trees"],
             "weights": [0.5]  # Only one weight for two models
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Number of weights" in response.json()["detail"]
     
-    def test_ensemble_train_all_models(self, client, sample_training_params):
+    def test_ensemble_train_all_models(self, authenticated_client, sample_training_params):
         """Test ensemble training with all available models"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Get list of trained models
-        models_response = client.get("/models")
+        models_response = authenticated_client.get("/models")
         trained_models = models_response.json()["trained_models"]
         
         request_data = {
             "ensemble_type": "voting",
             "model_names": trained_models
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert len(data["models_used"]) == len(trained_models)
     
-    def test_ensemble_train_metrics_valid(self, client, sample_training_params):
+    def test_ensemble_train_metrics_valid(self, authenticated_client, sample_training_params):
         """Test that ensemble metrics are valid"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        response = client.post("/ensemble/train", json=request_data)
+        response = authenticated_client.post("/ensemble/train", json=request_data)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         metrics = data["metrics"]
@@ -169,7 +169,7 @@ class TestEnsembleListEndpoint:
     
     def test_ensemble_list_empty(self, client):
         """Test ensemble list when no ensembles are trained"""
-        response = client.get("/ensemble/list")
+        response = authenticated_client.get("/ensemble/list")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "ensembles" in data
@@ -177,26 +177,26 @@ class TestEnsembleListEndpoint:
         assert data["count"] == 0
         assert len(data["ensembles"]) == 0
     
-    def test_ensemble_list_after_training(self, client, sample_training_params):
+    def test_ensemble_list_after_training(self, authenticated_client, sample_training_params):
         """Test ensemble list after training ensembles"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train multiple ensembles
         voting_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=voting_request)
+        authenticated_client.post("/ensemble/train", json=voting_request)
         
         stacking_request = {
             "ensemble_type": "stacking",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=stacking_request)
+        authenticated_client.post("/ensemble/train", json=stacking_request)
         
         # Check list
-        response = client.get("/ensemble/list")
+        response = authenticated_client.get("/ensemble/list")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["count"] == 2
@@ -207,7 +207,7 @@ class TestEnsembleListEndpoint:
 class TestEnsemblePredictEndpoint:
     """Tests for the /ensemble/predict endpoint"""
     
-    def test_ensemble_predict_without_ensemble(self, client, sample_features):
+    def test_ensemble_predict_without_ensemble(self, authenticated_client, sample_features):
         """Test ensemble prediction when no ensemble is trained"""
         response = client.post(
             "/ensemble/predict",
@@ -217,17 +217,17 @@ class TestEnsemblePredictEndpoint:
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "not found" in response.json()["detail"].lower()
     
-    def test_ensemble_predict_voting(self, client, sample_training_params, sample_features):
+    def test_ensemble_predict_voting(self, authenticated_client, sample_training_params, sample_features):
         """Test prediction with voting ensemble"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train ensemble
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=request_data)
+        authenticated_client.post("/ensemble/train", json=request_data)
         
         # Make prediction
         response = client.post(
@@ -245,17 +245,17 @@ class TestEnsemblePredictEndpoint:
         assert "class_0" in data["probability"]
         assert "class_1" in data["probability"]
     
-    def test_ensemble_predict_stacking(self, client, sample_training_params, sample_features):
+    def test_ensemble_predict_stacking(self, authenticated_client, sample_training_params, sample_features):
         """Test prediction with stacking ensemble"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train ensemble
         request_data = {
             "ensemble_type": "stacking",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=request_data)
+        authenticated_client.post("/ensemble/train", json=request_data)
         
         # Make prediction
         response = client.post(
@@ -267,10 +267,10 @@ class TestEnsemblePredictEndpoint:
         data = response.json()
         assert data["ensemble_used"] == "stacking_ensemble"
     
-    def test_ensemble_predict_weighted(self, client, sample_training_params, sample_features):
+    def test_ensemble_predict_weighted(self, authenticated_client, sample_training_params, sample_features):
         """Test prediction with weighted ensemble"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train ensemble
         request_data = {
@@ -278,7 +278,7 @@ class TestEnsemblePredictEndpoint:
             "model_names": ["random_forest", "extra_trees"],
             "weights": [0.6, 0.4]
         }
-        client.post("/ensemble/train", json=request_data)
+        authenticated_client.post("/ensemble/train", json=request_data)
         
         # Make prediction
         response = client.post(
@@ -290,17 +290,17 @@ class TestEnsemblePredictEndpoint:
         data = response.json()
         assert data["ensemble_used"] == "weighted_ensemble"
     
-    def test_ensemble_predict_probabilities_valid(self, client, sample_training_params, sample_features):
+    def test_ensemble_predict_probabilities_valid(self, authenticated_client, sample_training_params, sample_features):
         """Test that ensemble prediction probabilities are valid"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train ensemble
         request_data = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=request_data)
+        authenticated_client.post("/ensemble/train", json=request_data)
         
         # Make prediction
         response = client.post(
@@ -323,27 +323,27 @@ class TestEnsembleLoadEndpoint:
     
     def test_ensemble_load_not_found(self, client):
         """Test loading non-existent ensemble"""
-        response = client.post("/ensemble/load", params={"ensemble_name": "nonexistent_ensemble"})
+        response = authenticated_client.post("/ensemble/load", params={"ensemble_name": "nonexistent_ensemble"})
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "not found" in response.json()["detail"].lower()
     
-    def test_ensemble_load_success(self, client, sample_training_params):
+    def test_ensemble_load_success(self, authenticated_client, sample_training_params):
         """Test loading a saved ensemble"""
         # Train models and ensemble first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         ensemble_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=ensemble_request)
+        authenticated_client.post("/ensemble/train", json=ensemble_request)
         
         # Clear ensemble from memory (simulate restart)
         from app.controllers import api
         api.ensemble_models.clear()
         
         # Load ensemble
-        response = client.post("/ensemble/load", params={"ensemble_name": "voting_ensemble"})
+        response = authenticated_client.post("/ensemble/load", params={"ensemble_name": "voting_ensemble"})
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "message" in data
@@ -356,22 +356,22 @@ class TestEnsembleMetricsEndpoint:
     
     def test_ensemble_metrics_not_found(self, client):
         """Test getting metrics for non-existent ensemble"""
-        response = client.get("/ensemble/metrics/nonexistent_ensemble")
+        response = authenticated_client.get("/ensemble/metrics/nonexistent_ensemble")
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
-    def test_ensemble_metrics_success(self, client, sample_training_params):
+    def test_ensemble_metrics_success(self, authenticated_client, sample_training_params):
         """Test getting metrics for an ensemble"""
         # Train models and ensemble first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         ensemble_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=ensemble_request)
+        authenticated_client.post("/ensemble/train", json=ensemble_request)
         
         # Get metrics
-        response = client.get("/ensemble/metrics/voting_ensemble")
+        response = authenticated_client.get("/ensemble/metrics/voting_ensemble")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "ensemble_name" in data
@@ -396,42 +396,42 @@ class TestEnsembleCompareEndpoint:
     
     def test_ensemble_compare_no_ensembles(self, client):
         """Test comparison when no ensembles are trained"""
-        response = client.get("/ensemble/compare")
+        response = authenticated_client.get("/ensemble/compare")
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "No ensembles trained" in response.json()["detail"]
     
-    def test_ensemble_compare_no_models(self, client, sample_training_params):
+    def test_ensemble_compare_no_models(self, authenticated_client, sample_training_params):
         """Test comparison when no individual models are trained"""
         # Train ensemble only
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         ensemble_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=ensemble_request)
+        authenticated_client.post("/ensemble/train", json=ensemble_request)
         
         # Clear individual models (simulate scenario)
         from app.controllers import api
         api.model_metrics.clear()
         
-        response = client.get("/ensemble/compare")
+        response = authenticated_client.get("/ensemble/compare")
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "No individual models trained" in response.json()["detail"]
     
-    def test_ensemble_compare_success(self, client, sample_training_params):
+    def test_ensemble_compare_success(self, authenticated_client, sample_training_params):
         """Test successful comparison of ensembles vs individual models"""
         # Train models and ensemble
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         ensemble_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        client.post("/ensemble/train", json=ensemble_request)
+        authenticated_client.post("/ensemble/train", json=ensemble_request)
         
         # Get comparison
-        response = client.get("/ensemble/compare")
+        response = authenticated_client.get("/ensemble/compare")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         
@@ -463,10 +463,10 @@ class TestEnsembleCompareEndpoint:
 class TestEnsembleWorkflow:
     """Integration tests for complete ensemble workflows"""
     
-    def test_complete_ensemble_workflow(self, client, sample_training_params, sample_features):
+    def test_complete_ensemble_workflow(self, authenticated_client, sample_training_params, sample_features):
         """Test complete workflow: train models -> train ensemble -> predict"""
         # Step 1: Train individual models
-        train_response = client.post("/train", params=sample_training_params)
+        train_response = authenticated_client.post("/train", params=sample_training_params)
         assert train_response.status_code == status.HTTP_200_OK
         
         # Step 2: Train ensemble
@@ -474,20 +474,20 @@ class TestEnsembleWorkflow:
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        ensemble_response = client.post("/ensemble/train", json=ensemble_request)
+        ensemble_response = authenticated_client.post("/ensemble/train", json=ensemble_request)
         assert ensemble_response.status_code == status.HTTP_200_OK
         
         # Step 3: List ensembles
-        list_response = client.get("/ensemble/list")
+        list_response = authenticated_client.get("/ensemble/list")
         assert list_response.status_code == status.HTTP_200_OK
         assert list_response.json()["count"] > 0
         
         # Step 4: Get ensemble metrics
-        metrics_response = client.get("/ensemble/metrics/voting_ensemble")
+        metrics_response = authenticated_client.get("/ensemble/metrics/voting_ensemble")
         assert metrics_response.status_code == status.HTTP_200_OK
         
         # Step 5: Compare ensembles vs individual models
-        compare_response = client.get("/ensemble/compare")
+        compare_response = authenticated_client.get("/ensemble/compare")
         assert compare_response.status_code == status.HTTP_200_OK
         
         # Step 6: Make prediction with ensemble
@@ -499,17 +499,17 @@ class TestEnsembleWorkflow:
         assert predict_response.status_code == status.HTTP_200_OK
         assert "prediction" in predict_response.json()
     
-    def test_multiple_ensemble_types(self, client, sample_training_params):
+    def test_multiple_ensemble_types(self, authenticated_client, sample_training_params):
         """Test training multiple ensemble types"""
         # Train models first
-        client.post("/train", params=sample_training_params)
+        authenticated_client.post("/train", params=sample_training_params)
         
         # Train voting ensemble
         voting_request = {
             "ensemble_type": "voting",
             "model_names": ["random_forest", "extra_trees"]
         }
-        voting_response = client.post("/ensemble/train", json=voting_request)
+        voting_response = authenticated_client.post("/ensemble/train", json=voting_request)
         assert voting_response.status_code == status.HTTP_200_OK
         
         # Train stacking ensemble
@@ -517,7 +517,7 @@ class TestEnsembleWorkflow:
             "ensemble_type": "stacking",
             "model_names": ["random_forest", "extra_trees"]
         }
-        stacking_response = client.post("/ensemble/train", json=stacking_request)
+        stacking_response = authenticated_client.post("/ensemble/train", json=stacking_request)
         assert stacking_response.status_code == status.HTTP_200_OK
         
         # Train weighted ensemble
@@ -526,11 +526,11 @@ class TestEnsembleWorkflow:
             "model_names": ["random_forest", "extra_trees"],
             "weights": [0.7, 0.3]
         }
-        weighted_response = client.post("/ensemble/train", json=weighted_request)
+        weighted_response = authenticated_client.post("/ensemble/train", json=weighted_request)
         assert weighted_response.status_code == status.HTTP_200_OK
         
         # Verify all ensembles are listed
-        list_response = client.get("/ensemble/list")
+        list_response = authenticated_client.get("/ensemble/list")
         assert list_response.status_code == status.HTTP_200_OK
         ensembles = list_response.json()["ensembles"]
         assert "voting_ensemble" in ensembles
@@ -538,7 +538,7 @@ class TestEnsembleWorkflow:
         assert "weighted_ensemble" in ensembles
         
         # Compare all ensembles
-        compare_response = client.get("/ensemble/compare")
+        compare_response = authenticated_client.get("/ensemble/compare")
         assert compare_response.status_code == status.HTTP_200_OK
         assert len(compare_response.json()["ensembles"]) == 3
 

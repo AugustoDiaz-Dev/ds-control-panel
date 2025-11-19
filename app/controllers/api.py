@@ -1,8 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from datetime import timedelta
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -72,6 +74,16 @@ except Exception:
     base64 = None
 
 from sklearn.ensemble import VotingClassifier, StackingClassifier
+
+# Authentication imports
+from app.auth import (
+    get_current_active_user,
+    get_current_admin_user,
+    create_access_token,
+    user_manager
+)
+from app.auth.models import User, UserCreate, UserUpdate, Token
+from app.auth.security import ACCESS_TOKEN_EXPIRE_MINUTES
 
 app = FastAPI(title="DS Control Panel API", version="1.0.0")
 
@@ -647,6 +659,12 @@ def index():
 @app.get("/")
 def root():
     endpoints = {
+        "auth": {
+            "login": "/auth/login",
+            "register": "/auth/register",
+            "me": "/auth/me",
+            "users": "/auth/users (admin only)"
+        },
         "train": "/train",
         "optimize": "/optimize",
         "predict": "/predict",
@@ -672,15 +690,95 @@ def root():
         "endpoints": endpoints,
         "mlflow_available": MLFLOW_AVAILABLE,
         "optuna_available": OPTUNA_AVAILABLE,
-        "shap_available": SHAP_AVAILABLE
+        "shap_available": SHAP_AVAILABLE,
+        "authentication_required": True
     }
+
+
+# ==================== Authentication Endpoints ====================
+
+@app.post("/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login endpoint to get access token"""
+    user = user_manager.authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    }
+
+
+@app.post("/auth/register", response_model=User)
+async def register(user_create: UserCreate):
+    """Register a new user"""
+    try:
+        user_in_db = user_manager.create_user(user_create)
+        return User(**user_in_db.model_dump(exclude={"hashed_password"}))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@app.get("/auth/me", response_model=User)
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    """Get current user information"""
+    return User(**current_user.model_dump(exclude={"hashed_password"}))
+
+
+@app.get("/auth/users", response_model=list[User])
+async def list_users(current_user: User = Depends(get_current_admin_user)):
+    """List all users (admin only)"""
+    return user_manager.list_users()
+
+
+@app.put("/auth/users/{user_id}", response_model=User)
+async def update_user(
+    user_id: str,
+    user_update: UserUpdate,
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Update a user (admin only)"""
+    user = user_manager.update_user(user_id, user_update)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    return User(**user.model_dump(exclude={"hashed_password"}))
+
+
+@app.delete("/auth/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Delete a user (admin only)"""
+    if not user_manager.delete_user(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    return {"message": "User deleted successfully"}
 
 @app.post("/train", response_model=TrainingResponse)
 def train_models(
     n_estimators: int = 100,
     learning_rate: float = 0.1,
     max_depth: int = 5,
-    include_catboost: bool = False
+    include_catboost: bool = False,
+    current_user: User = Depends(get_current_active_user)
 ):
     """Train all models with specified parameters"""
     global trained_models, best_model_name, model_metrics, X_test_global, y_test_global, feature_names, X_train_global, y_train_global
@@ -863,7 +961,8 @@ def train_models(
 @app.post("/optimize", response_model=OptimizationResponse)
 def optimize_hyperparameters(
     model_name: str,
-    n_trials: int = 20
+    n_trials: int = 20,
+    current_user: User = Depends(get_current_active_user)
 ):
     """Optimize hyperparameters for a specific model using Optuna"""
     global trained_models, model_metrics, X_test_global, y_test_global, feature_names
@@ -978,7 +1077,7 @@ def optimize_hyperparameters(
         )
 
 @app.get("/metrics")
-def get_metrics():
+def get_metrics(current_user: User = Depends(get_current_active_user)):
     """Get metrics for all trained models"""
     if not model_metrics:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -988,7 +1087,7 @@ def get_metrics():
     }
 
 @app.get("/models")
-def list_models():
+def list_models(current_user: User = Depends(get_current_active_user)):
     """List available models"""
     return {
         "trained_models": list(trained_models.keys()),
@@ -997,7 +1096,7 @@ def list_models():
     }
 
 @app.get("/mlflow/experiments")
-def get_mlflow_experiments():
+def get_mlflow_experiments(current_user: User = Depends(get_current_active_user)):
     """Get list of MLflow experiments"""
     if not MLFLOW_AVAILABLE:
         raise HTTPException(status_code=503, detail="MLflow is not available. Please install mlflow.")
@@ -1025,7 +1124,11 @@ def get_mlflow_experiments():
         raise HTTPException(status_code=500, detail=f"Error fetching experiments: {str(e)}")
 
 @app.get("/mlflow/runs")
-def get_mlflow_runs(experiment_id: str = None, limit: int = 10):
+def get_mlflow_runs(
+    experiment_id: str = None,
+    limit: int = 10,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get list of MLflow runs"""
     if not MLFLOW_AVAILABLE:
         raise HTTPException(status_code=503, detail="MLflow is not available. Please install mlflow.")
@@ -1065,7 +1168,7 @@ def get_mlflow_runs(experiment_id: str = None, limit: int = 10):
         raise HTTPException(status_code=500, detail=f"Error fetching runs: {str(e)}")
 
 @app.get("/predict")
-def predict_get():
+def predict_get(current_user: User = Depends(get_current_active_user)):
     """Get endpoint showing usage instructions for /predict"""
     return {
         "message": "Use POST method to make predictions",
@@ -1083,7 +1186,11 @@ def predict_get():
     }
 
 @app.post("/predict")
-def predict(request: PredictionRequest, model_name: str = None):
+def predict(
+    request: PredictionRequest,
+    model_name: str = None,
+    current_user: User = Depends(get_current_active_user)
+):
     """Make prediction using specified model or best model"""
     if not trained_models:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1131,7 +1238,10 @@ def predict(request: PredictionRequest, model_name: str = None):
         )
 
 @app.get("/visualizations/confusion-matrix/{model_name}")
-def get_confusion_matrix(model_name: str):
+def get_confusion_matrix(
+    model_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get confusion matrix data for a specific model"""
     if not trained_models:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1153,7 +1263,10 @@ def get_confusion_matrix(model_name: str):
     }
 
 @app.get("/visualizations/roc-curve/{model_name}")
-def get_roc_curve(model_name: str):
+def get_roc_curve(
+    model_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get ROC curve data for a specific model"""
     if not trained_models:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1183,7 +1296,10 @@ def get_roc_curve(model_name: str):
     }
 
 @app.get("/visualizations/feature-importance/{model_name}")
-def get_feature_importance(model_name: str):
+def get_feature_importance(
+    model_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get feature importance for a specific model"""
     if not trained_models:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1215,7 +1331,7 @@ def get_feature_importance(model_name: str):
     }
 
 @app.get("/visualizations/model-comparison")
-def get_model_comparison():
+def get_model_comparison(current_user: User = Depends(get_current_active_user)):
     """Get comparison data for all trained models"""
     if not model_metrics:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1237,7 +1353,10 @@ def get_model_comparison():
     }
 
 @app.get("/visualizations/all/{model_name}")
-def get_all_visualizations(model_name: str):
+def get_all_visualizations(
+    model_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get all visualization data for a specific model in one call"""
     if not trained_models:
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
@@ -1297,7 +1416,11 @@ def get_all_visualizations(model_name: str):
     }
 
 @app.get("/shap/values/{model_name}")
-def get_shap_values(model_name: str, sample_size: int = 100):
+def get_shap_values(
+    model_name: str,
+    sample_size: int = 100,
+    current_user: User = Depends(get_current_active_user)
+):
     """Calculate and return SHAP values for a specific model"""
     if not SHAP_AVAILABLE:
         raise HTTPException(status_code=503, detail="SHAP is not available. Please install shap.")
@@ -1355,7 +1478,11 @@ def get_shap_values(model_name: str, sample_size: int = 100):
     }
 
 @app.get("/shap/explain/{model_name}")
-def explain_prediction(model_name: str, features: str):
+def explain_prediction(
+    model_name: str,
+    features: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Explain a single prediction using SHAP values"""
     if not SHAP_AVAILABLE:
         raise HTTPException(status_code=503, detail="SHAP is not available. Please install shap.")
@@ -1436,7 +1563,11 @@ def explain_prediction(model_name: str, features: str):
     }
 
 @app.get("/shap/plot/{model_name}")
-def get_shap_summary_plot(model_name: str, sample_size: int = 100):
+def get_shap_summary_plot(
+    model_name: str,
+    sample_size: int = 100,
+    current_user: User = Depends(get_current_active_user)
+):
     """Generate SHAP summary plot (matplotlib style) and return as base64 image"""
     if not SHAP_AVAILABLE or not MATPLOTLIB_AVAILABLE:
         raise HTTPException(status_code=503, detail="SHAP or matplotlib is not available.")
@@ -1517,7 +1648,10 @@ def get_shap_summary_plot(model_name: str, sample_size: int = 100):
         raise HTTPException(status_code=500, detail=f"Error generating SHAP plot: {str(e)}")
 
 @app.post("/ensemble/train", response_model=EnsembleResponse)
-def train_ensemble(request: EnsembleRequest):
+def train_ensemble(
+    request: EnsembleRequest,
+    current_user: User = Depends(get_current_active_user)
+):
     """Train an ensemble model using specified models"""
     global ensemble_models, X_train_global, y_train_global, X_test_global, y_test_global
     
@@ -1601,7 +1735,7 @@ def train_ensemble(request: EnsembleRequest):
     )
 
 @app.get("/ensemble/list")
-def list_ensembles():
+def list_ensembles(current_user: User = Depends(get_current_active_user)):
     """List all trained ensemble models"""
     # Check for saved ensemble models on disk
     saved_ensembles = []
@@ -1618,7 +1752,10 @@ def list_ensembles():
     }
 
 @app.post("/ensemble/load")
-def load_ensemble(ensemble_name: str):
+def load_ensemble(
+    ensemble_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Load a saved ensemble model from disk
     
     Args:
@@ -1651,7 +1788,10 @@ def load_ensemble(ensemble_name: str):
         )
 
 @app.get("/ensemble/metrics/{ensemble_name}")
-def get_ensemble_metrics(ensemble_name: str):
+def get_ensemble_metrics(
+    ensemble_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Get metrics for a specific ensemble model"""
     if ensemble_name not in ensemble_models:
         # Try to load from disk
@@ -1695,7 +1835,7 @@ def get_ensemble_metrics(ensemble_name: str):
     }
 
 @app.get("/ensemble/compare")
-def compare_ensemble_vs_individual():
+def compare_ensemble_vs_individual(current_user: User = Depends(get_current_active_user)):
     """Compare ensemble metrics with individual model metrics"""
     if not ensemble_models:
         raise HTTPException(
@@ -1773,7 +1913,11 @@ def compare_ensemble_vs_individual():
     return comparison
 
 @app.post("/ensemble/predict")
-def predict_ensemble(request: PredictionRequest, ensemble_name: str):
+def predict_ensemble(
+    request: PredictionRequest,
+    ensemble_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """Make prediction using an ensemble model"""
     if ensemble_name not in ensemble_models:
         # Try to load from disk

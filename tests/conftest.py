@@ -16,24 +16,14 @@ sys.path.insert(0, str(BASE_DIR))
 from app.controllers.api import app
 
 # Handle TestClient compatibility with different httpx/starlette versions
-# Try to import TestClient from fastapi first, fallback to starlette
+# Use starlette TestClient directly as it's more compatible
 try:
-    from fastapi.testclient import TestClient as FastAPITestClient
-    TestClient = FastAPITestClient
-except (ImportError, TypeError):
+    from starlette.testclient import TestClient
+except ImportError:
     try:
-        from starlette.testclient import TestClient as StarletteTestClient
-        TestClient = StarletteTestClient
-    except (ImportError, TypeError):
-        # Last resort: use httpx directly
-        import httpx
-        from httpx import ASGITransport
-        class TestClient:
-            def __init__(self, app):
-                transport = ASGITransport(app=app)
-                self._client = httpx.Client(transport=transport, base_url="http://testserver", follow_redirects=True)
-            def __getattr__(self, name):
-                return getattr(self._client, name)
+        from fastapi.testclient import TestClient
+    except ImportError:
+        raise ImportError("Could not import TestClient. Please install starlette or fastapi.")
 
 @pytest.fixture(autouse=True)
 def reset_global_state():
@@ -86,24 +76,14 @@ def reset_global_state():
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app"""
-    # Try different ways to create TestClient based on version compatibility
+    # Starlette TestClient should work with both positional and keyword args
     try:
-        # Method 1: Try with keyword argument (newer versions)
-        return TestClient(app=app)
-    except (TypeError, ValueError):
+        return TestClient(app)
+    except (TypeError, ValueError, AttributeError):
         try:
-            # Method 2: Try with positional argument (older versions)
-            return TestClient(app)
-        except (TypeError, ValueError, AttributeError):
-            # Method 3: Fallback to httpx directly for httpx 0.28+
-            import httpx
-            try:
-                from httpx import ASGITransport
-                transport = ASGITransport(app=app)
-                return httpx.Client(transport=transport, base_url="http://testserver", follow_redirects=True)
-            except Exception:
-                # Last resort: create a simple wrapper
-                raise RuntimeError("Could not create TestClient. Please check httpx and starlette versions.")
+            return TestClient(app=app)
+        except Exception as e:
+            raise RuntimeError(f"Could not create TestClient: {e}. Please check starlette version.")
 
 @pytest.fixture
 def temp_data_dir():
@@ -126,4 +106,187 @@ def sample_training_params():
         "max_depth": 3,
         "include_catboost": False
     }
+
+# ==================== Authentication Fixtures ====================
+
+@pytest.fixture(autouse=True)
+def reset_user_storage():
+    """Reset user storage before each test to avoid test interference"""
+    from app.auth.user_manager import user_manager
+    import json
+    from pathlib import Path
+    
+    # Save original users file if it exists
+    BASE_DIR = Path(__file__).parent.parent
+    users_file = BASE_DIR / "users.json"
+    original_users = {}
+    
+    if users_file.exists():
+        try:
+            with open(users_file, 'r') as f:
+                original_users = json.load(f)
+        except Exception:
+            pass
+    
+    # Clear users before test
+    user_manager._users.clear()
+    user_manager._ensure_default_user()
+    
+    yield
+    
+    # Restore users after test
+    user_manager._users.clear()
+    if original_users:
+        try:
+            with open(users_file, 'w') as f:
+                json.dump(original_users, f, indent=2)
+            user_manager._load_users()
+        except Exception:
+            pass
+    else:
+        # If no original users, ensure default user exists
+        user_manager._ensure_default_user()
+
+@pytest.fixture
+def test_user():
+    """Create a test user for authentication"""
+    from app.auth.user_manager import user_manager
+    from app.auth.models import UserCreate
+    
+    user_create = UserCreate(
+        username="testuser",
+        email="test@example.com",
+        password="testpass123",
+        full_name="Test User",
+        is_active=True,
+        is_admin=False
+    )
+    
+    user = user_manager.create_user(user_create)
+    yield user
+    
+    # Cleanup
+    try:
+        user_manager.delete_user(user.id)
+    except Exception:
+        pass
+
+@pytest.fixture
+def test_admin_user():
+    """Create a test admin user for authentication"""
+    from app.auth.user_manager import user_manager
+    from app.auth.models import UserCreate
+    
+    user_create = UserCreate(
+        username="testadmin",
+        email="admin@example.com",
+        password="adminpass123",
+        full_name="Test Admin",
+        is_active=True,
+        is_admin=True
+    )
+    
+    user = user_manager.create_user(user_create)
+    yield user
+    
+    # Cleanup
+    try:
+        user_manager.delete_user(user.id)
+    except Exception:
+        pass
+
+@pytest.fixture
+def auth_token(client, test_user):
+    """Get authentication token for test user"""
+    response = client.post(
+        "/auth/login",
+        data={"username": "testuser", "password": "testpass123"}
+    )
+    assert response.status_code == 200
+    token_data = response.json()
+    return token_data["access_token"]
+
+@pytest.fixture
+def admin_token(client, test_admin_user):
+    """Get authentication token for test admin user"""
+    response = client.post(
+        "/auth/login",
+        data={"username": "testadmin", "password": "adminpass123"}
+    )
+    assert response.status_code == 200
+    token_data = response.json()
+    return token_data["access_token"]
+
+@pytest.fixture
+def authenticated_client(client, auth_token):
+    """Create an authenticated test client"""
+    # Create a new client with auth headers
+    class AuthenticatedClient:
+        def __init__(self, base_client, token):
+            self._client = base_client
+            self._token = token
+            self._headers = {"Authorization": f"Bearer {token}"}
+        
+        def get(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.get(url, headers=headers, **kwargs)
+        
+        def post(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.post(url, headers=headers, **kwargs)
+        
+        def put(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.put(url, headers=headers, **kwargs)
+        
+        def delete(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.delete(url, headers=headers, **kwargs)
+        
+        def patch(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.patch(url, headers=headers, **kwargs)
+    
+    return AuthenticatedClient(client, auth_token)
+
+@pytest.fixture
+def admin_client(client, admin_token):
+    """Create an authenticated admin test client"""
+    class AuthenticatedClient:
+        def __init__(self, base_client, token):
+            self._client = base_client
+            self._token = token
+            self._headers = {"Authorization": f"Bearer {token}"}
+        
+        def get(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.get(url, headers=headers, **kwargs)
+        
+        def post(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.post(url, headers=headers, **kwargs)
+        
+        def put(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.put(url, headers=headers, **kwargs)
+        
+        def delete(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.delete(url, headers=headers, **kwargs)
+        
+        def patch(self, url, **kwargs):
+            headers = kwargs.pop("headers", {})
+            headers.update(self._headers)
+            return self._client.patch(url, headers=headers, **kwargs)
+    
+    return AuthenticatedClient(client, admin_token)
 

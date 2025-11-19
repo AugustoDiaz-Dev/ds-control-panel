@@ -85,7 +85,17 @@ python -m http.server 8080
 
 ## API Endpoints
 
-### Core Endpoints
+### Authentication Endpoints
+- `POST /auth/login` - Login to get access token (form data: username, password)
+- `POST /auth/register` - Register a new user (JSON body: username, password, email, full_name)
+- `GET /auth/me` - Get current user information (requires authentication)
+- `GET /auth/users` - List all users (admin only)
+- `PUT /auth/users/{user_id}` - Update a user (admin only)
+- `DELETE /auth/users/{user_id}` - Delete a user (admin only)
+
+**Note:** All endpoints except `/`, `/auth/login`, `/auth/register`, `/dashboard`, and `/index` require authentication.
+
+### Core Endpoints (Require Authentication)
 - `GET /` - API information
 - `POST /train` - Train all models
 - `POST /optimize` - Optimize hyperparameters
@@ -109,11 +119,50 @@ python -m http.server 8080
 
 See API documentation at `http://localhost:8000/docs`
 
+### Authentication Usage
+
+1. **Login to get access token:**
+```bash
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
+```
+
+2. **Use token in API requests:**
+```bash
+curl -X GET "http://localhost:8000/models" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+3. **Register a new user:**
+```bash
+curl -X POST "http://localhost:8000/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "newuser",
+    "email": "user@example.com",
+    "password": "securepassword",
+    "full_name": "New User"
+  }'
+```
+
+**Default Admin User:**
+- Username: `admin`
+- Password: `admin123`
+- ⚠️ **Change this password in production!**
+
 ### Example: Training an Ensemble
 
 ```bash
+# First, login to get token
+TOKEN=$(curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123" | jq -r '.access_token')
+
+# Then use the token for authenticated requests
 curl -X POST "http://localhost:8000/ensemble/train" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "ensemble_type": "voting",
     "model_names": ["random_forest", "xgboost", "lightgbm"]
@@ -123,13 +172,15 @@ curl -X POST "http://localhost:8000/ensemble/train" \
 ### Example: Getting SHAP Values
 
 ```bash
-curl "http://localhost:8000/shap/values/random_forest?sample_size=100"
+curl "http://localhost:8000/shap/values/random_forest?sample_size=100" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Example: Explaining a Prediction
 
 ```bash
-curl "http://localhost:8000/shap/explain/random_forest?features=750,80000,15000,35,60000,8,25000"
+curl "http://localhost:8000/shap/explain/random_forest?features=750,80000,15000,35,60000,8,25000" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Testing

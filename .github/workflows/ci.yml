@@ -41,9 +41,19 @@ jobs:
       run: |
         pytest tests/ -v --tb=short --cov=app --cov-report=xml --cov-report=html --cov-report=term-missing --maxfail=5
       
-    - name: Run critical tests (must pass)
+    - name: Run critical CI/CD tests (must pass)
       run: |
+        pytest tests/integration/test_cicd.py -v --tb=short -m cicd
         pytest tests/unit/test_data_loading.py -v --tb=short
+        pytest tests/unit/test_auth.py -v --tb=short -m unit
+      
+    - name: Run authentication tests
+      run: |
+        pytest tests/unit/test_auth.py tests/integration/test_auth_workflow.py -v --tb=short -m "auth or unit"
+      
+    - name: Run model validation tests (optional)
+      continue-on-error: true
+      run: |
         pytest tests/model_validation/test_model_quality.py::TestModelMetrics -v --tb=short || echo "Model validation tests skipped"
     
     - name: Upload coverage to Codecov
