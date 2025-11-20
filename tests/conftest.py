@@ -30,6 +30,7 @@ def reset_global_state():
     """Reset global state before each test to avoid test interference"""
     # Import here to avoid circular imports
     from app.controllers import api
+    from app.monitoring.metrics import metrics_collector
     
     # Save original state
     original_trained_models = dict(api.trained_models)
@@ -42,6 +43,9 @@ def reset_global_state():
     original_best_model = api.best_model_name
     original_ensembles = dict(api.ensemble_models)
     original_shap_cache = dict(api.shap_values_cache)
+    
+    # Save metrics state
+    metrics_collector.reset()
     
     # Clear state before test
     api.trained_models.clear()
@@ -72,6 +76,9 @@ def reset_global_state():
     api.ensemble_models.update(original_ensembles)
     api.shap_values_cache.clear()
     api.shap_values_cache.update(original_shap_cache)
+    
+    # Reset metrics after test
+    metrics_collector.reset()
 
 @pytest.fixture
 def client():

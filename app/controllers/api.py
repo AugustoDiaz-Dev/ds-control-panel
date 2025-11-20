@@ -4,13 +4,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from datetime import timedelta
+from datetime import timedelta, datetime
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, roc_curve
 import joblib
 import os
+import time
 from pathlib import Path
 try:
     import lightgbm as lgb
@@ -85,6 +86,13 @@ from app.auth import (
 from app.auth.models import User, UserCreate, UserUpdate, Token
 from app.auth.security import ACCESS_TOKEN_EXPIRE_MINUTES
 
+# Monitoring imports
+from app.monitoring import setup_logging, get_logger, LoggingMiddleware, metrics_collector
+
+# Setup logging
+setup_logging(log_level="INFO")
+logger = get_logger(__name__)
+
 app = FastAPI(title="DS Control Panel API", version="1.0.0")
 
 # Enable CORS for notebook access
@@ -95,6 +103,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add logging and metrics middleware
+app.add_middleware(LoggingMiddleware)
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent.parent
@@ -677,7 +688,13 @@ def root():
         "ensemble_load": "/ensemble/load",
         "ensemble_metrics": "/ensemble/metrics/{ensemble_name}",
         "ensemble_compare": "/ensemble/compare",
-        "ensemble_predict": "/ensemble/predict"
+        "ensemble_predict": "/ensemble/predict",
+        "monitoring": {
+            "health": "/health",
+            "model_status": "/model/status",
+            "monitoring_metrics": "/monitoring/metrics",
+            "recent_errors": "/monitoring/errors"
+        }
     }
     if MLFLOW_AVAILABLE:
         endpoints.update({
@@ -783,40 +800,127 @@ def train_models(
     """Train all models with specified parameters"""
     global trained_models, best_model_name, model_metrics, X_test_global, y_test_global, feature_names, X_train_global, y_train_global
     
-    # Validate and sanitize parameters
-    if n_estimators < 1:
-        n_estimators = 100
-    if learning_rate <= 0:
-        learning_rate = 0.1
-    if max_depth < 1:
-        max_depth = None  # Use None for unlimited depth in tree models
+    training_start_time = time.time()
+    logger.info(f"Starting model training - User: {current_user.username}, n_estimators: {n_estimators}, learning_rate: {learning_rate}, max_depth: {max_depth}")
     
-    # Load or generate data
-    df = load_or_generate_data()
-    X_train, X_test, y_train, y_test = prepare_data(df)
-    
-    # Store test and train data globally for visualizations and SHAP
-    X_test_global = X_test
-    y_test_global = y_test
-    X_train_global = X_train
-    y_train_global = y_train
-    feature_names = list(X_test.columns)
-    
-    trained_models = {}
-    model_metrics = {}
-    all_metrics = []
-    
-    # Start MLflow run if available
-    if MLFLOW_AVAILABLE:
-        with mlflow.start_run():
-            # Log hyperparameters
-            mlflow.log_param("n_estimators", n_estimators)
-            mlflow.log_param("learning_rate", learning_rate)
-            mlflow.log_param("max_depth", max_depth)
-            mlflow.log_param("include_catboost", include_catboost)
-            mlflow.log_param("train_size", len(X_train))
-            mlflow.log_param("test_size", len(X_test))
-            
+    try:
+        # Validate and sanitize parameters
+        if n_estimators < 1:
+            n_estimators = 100
+        if learning_rate <= 0:
+            learning_rate = 0.1
+        if max_depth < 1:
+            max_depth = None  # Use None for unlimited depth in tree models
+        
+        # Load or generate data
+        df = load_or_generate_data()
+        X_train, X_test, y_train, y_test = prepare_data(df)
+        
+        # Store test and train data globally for visualizations and SHAP
+        X_test_global = X_test
+        y_test_global = y_test
+        X_train_global = X_train
+        y_train_global = y_train
+        feature_names = list(X_test.columns)
+        
+        trained_models = {}
+        model_metrics = {}
+        all_metrics = []
+        
+        # Start MLflow run if available
+        if MLFLOW_AVAILABLE:
+            with mlflow.start_run():
+                # Log hyperparameters
+                mlflow.log_param("n_estimators", n_estimators)
+                mlflow.log_param("learning_rate", learning_rate)
+                mlflow.log_param("max_depth", max_depth)
+                mlflow.log_param("include_catboost", include_catboost)
+                mlflow.log_param("train_size", len(X_train))
+                mlflow.log_param("test_size", len(X_test))
+                
+                # Train LightGBM
+                if LIGHTGBM_AVAILABLE:
+                    print("Training LightGBM...")
+                    lgb_model, lgb_metrics = train_lightgbm(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
+                    if lgb_model is not None:
+                        trained_models['lightgbm'] = lgb_model
+                        model_metrics['lightgbm'] = lgb_metrics
+                        all_metrics.append(ModelMetrics(model_name='lightgbm', **lgb_metrics))
+                        # Log to MLflow
+                        mlflow.log_metrics({f"lightgbm_{k}": v for k, v in lgb_metrics.items()})
+                        mlflow.lightgbm.log_model(lgb_model, "lightgbm_model")
+                else:
+                    print("LightGBM not available (missing libomp dependency)")
+                
+                # Train XGBoost
+                if XGBOOST_AVAILABLE:
+                    print("Training XGBoost...")
+                    xgb_model, xgb_metrics = train_xgboost(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
+                    if xgb_model is not None:
+                        trained_models['xgboost'] = xgb_model
+                        model_metrics['xgboost'] = xgb_metrics
+                        all_metrics.append(ModelMetrics(model_name='xgboost', **xgb_metrics))
+                        # Log to MLflow
+                        mlflow.log_metrics({f"xgboost_{k}": v for k, v in xgb_metrics.items()})
+                        mlflow.xgboost.log_model(xgb_model, "xgboost_model")
+                else:
+                    print("XGBoost not available")
+                
+                # Train Random Forest
+                print("Training Random Forest...")
+                rf_model, rf_metrics = train_random_forest(X_train, y_train, X_test, y_test, n_estimators, max_depth)
+                trained_models['random_forest'] = rf_model
+                model_metrics['random_forest'] = rf_metrics
+                all_metrics.append(ModelMetrics(model_name='random_forest', **rf_metrics))
+                # Log to MLflow
+                mlflow.log_metrics({f"random_forest_{k}": v for k, v in rf_metrics.items()})
+                mlflow.sklearn.log_model(rf_model, "random_forest_model")
+                
+                # Train Extra Trees
+                print("Training Extra Trees...")
+                et_model, et_metrics = train_extra_trees(X_train, y_train, X_test, y_test, n_estimators, max_depth)
+                trained_models['extra_trees'] = et_model
+                model_metrics['extra_trees'] = et_metrics
+                all_metrics.append(ModelMetrics(model_name='extra_trees', **et_metrics))
+                # Log to MLflow
+                mlflow.log_metrics({f"extra_trees_{k}": v for k, v in et_metrics.items()})
+                mlflow.sklearn.log_model(et_model, "extra_trees_model")
+                
+                # Train CatBoost (optional)
+                if include_catboost:
+                    print("Training CatBoost...")
+                    cb_model, cb_metrics = train_catboost(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
+                    if cb_model is not None:
+                        trained_models['catboost'] = cb_model
+                        model_metrics['catboost'] = cb_metrics
+                        all_metrics.append(ModelMetrics(model_name='catboost', **cb_metrics))
+                        # Log to MLflow
+                        mlflow.log_metrics({f"catboost_{k}": v for k, v in cb_metrics.items()})
+                        mlflow.catboost.log_model(cb_model, "catboost_model")
+                
+                # Find best model based on AUC
+                best_model_name = max(model_metrics.items(), key=lambda x: x[1]['auc'])[0]
+                best_auc = model_metrics[best_model_name]['auc']
+                
+                # Log best model info
+                mlflow.log_param("best_model", best_model_name)
+                mlflow.log_metric("best_auc", best_auc)
+                
+                # Save best model
+                best_model_path = MODELS_DIR / f"{best_model_name}_best.pkl"
+                joblib.dump(trained_models[best_model_name], best_model_path)
+                
+                # Log best model to MLflow
+                if best_model_name == 'lightgbm' and LIGHTGBM_AVAILABLE:
+                    mlflow.lightgbm.log_model(trained_models[best_model_name], "best_model")
+                elif best_model_name == 'xgboost' and XGBOOST_AVAILABLE:
+                    mlflow.xgboost.log_model(trained_models[best_model_name], "best_model")
+                elif best_model_name == 'catboost' and include_catboost and CATBOOST_AVAILABLE:
+                    mlflow.catboost.log_model(trained_models[best_model_name], "best_model")
+                else:
+                    mlflow.sklearn.log_model(trained_models[best_model_name], "best_model")
+        else:
+            # Fallback to original behavior if MLflow not available
             # Train LightGBM
             if LIGHTGBM_AVAILABLE:
                 print("Training LightGBM...")
@@ -825,9 +929,6 @@ def train_models(
                     trained_models['lightgbm'] = lgb_model
                     model_metrics['lightgbm'] = lgb_metrics
                     all_metrics.append(ModelMetrics(model_name='lightgbm', **lgb_metrics))
-                    # Log to MLflow
-                    mlflow.log_metrics({f"lightgbm_{k}": v for k, v in lgb_metrics.items()})
-                    mlflow.lightgbm.log_model(lgb_model, "lightgbm_model")
             else:
                 print("LightGBM not available (missing libomp dependency)")
             
@@ -839,9 +940,6 @@ def train_models(
                     trained_models['xgboost'] = xgb_model
                     model_metrics['xgboost'] = xgb_metrics
                     all_metrics.append(ModelMetrics(model_name='xgboost', **xgb_metrics))
-                    # Log to MLflow
-                    mlflow.log_metrics({f"xgboost_{k}": v for k, v in xgb_metrics.items()})
-                    mlflow.xgboost.log_model(xgb_model, "xgboost_model")
             else:
                 print("XGBoost not available")
             
@@ -851,9 +949,6 @@ def train_models(
             trained_models['random_forest'] = rf_model
             model_metrics['random_forest'] = rf_metrics
             all_metrics.append(ModelMetrics(model_name='random_forest', **rf_metrics))
-            # Log to MLflow
-            mlflow.log_metrics({f"random_forest_{k}": v for k, v in rf_metrics.items()})
-            mlflow.sklearn.log_model(rf_model, "random_forest_model")
             
             # Train Extra Trees
             print("Training Extra Trees...")
@@ -861,9 +956,6 @@ def train_models(
             trained_models['extra_trees'] = et_model
             model_metrics['extra_trees'] = et_metrics
             all_metrics.append(ModelMetrics(model_name='extra_trees', **et_metrics))
-            # Log to MLflow
-            mlflow.log_metrics({f"extra_trees_{k}": v for k, v in et_metrics.items()})
-            mlflow.sklearn.log_model(et_model, "extra_trees_model")
             
             # Train CatBoost (optional)
             if include_catboost:
@@ -873,90 +965,33 @@ def train_models(
                     trained_models['catboost'] = cb_model
                     model_metrics['catboost'] = cb_metrics
                     all_metrics.append(ModelMetrics(model_name='catboost', **cb_metrics))
-                    # Log to MLflow
-                    mlflow.log_metrics({f"catboost_{k}": v for k, v in cb_metrics.items()})
-                    mlflow.catboost.log_model(cb_model, "catboost_model")
             
             # Find best model based on AUC
             best_model_name = max(model_metrics.items(), key=lambda x: x[1]['auc'])[0]
-            best_auc = model_metrics[best_model_name]['auc']
-            
-            # Log best model info
-            mlflow.log_param("best_model", best_model_name)
-            mlflow.log_metric("best_auc", best_auc)
             
             # Save best model
             best_model_path = MODELS_DIR / f"{best_model_name}_best.pkl"
             joblib.dump(trained_models[best_model_name], best_model_path)
             
-            # Log best model to MLflow
-            if best_model_name == 'lightgbm' and LIGHTGBM_AVAILABLE:
-                mlflow.lightgbm.log_model(trained_models[best_model_name], "best_model")
-            elif best_model_name == 'xgboost' and XGBOOST_AVAILABLE:
-                mlflow.xgboost.log_model(trained_models[best_model_name], "best_model")
-            elif best_model_name == 'catboost' and include_catboost and CATBOOST_AVAILABLE:
-                mlflow.catboost.log_model(trained_models[best_model_name], "best_model")
-            else:
-                mlflow.sklearn.log_model(trained_models[best_model_name], "best_model")
-    else:
-        # Fallback to original behavior if MLflow not available
-        # Train LightGBM
-        if LIGHTGBM_AVAILABLE:
-            print("Training LightGBM...")
-            lgb_model, lgb_metrics = train_lightgbm(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
-            if lgb_model is not None:
-                trained_models['lightgbm'] = lgb_model
-                model_metrics['lightgbm'] = lgb_metrics
-                all_metrics.append(ModelMetrics(model_name='lightgbm', **lgb_metrics))
-        else:
-            print("LightGBM not available (missing libomp dependency)")
-        
-        # Train XGBoost
-        if XGBOOST_AVAILABLE:
-            print("Training XGBoost...")
-            xgb_model, xgb_metrics = train_xgboost(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
-            if xgb_model is not None:
-                trained_models['xgboost'] = xgb_model
-                model_metrics['xgboost'] = xgb_metrics
-                all_metrics.append(ModelMetrics(model_name='xgboost', **xgb_metrics))
-        else:
-            print("XGBoost not available")
-        
-        # Train Random Forest
-        print("Training Random Forest...")
-        rf_model, rf_metrics = train_random_forest(X_train, y_train, X_test, y_test, n_estimators, max_depth)
-        trained_models['random_forest'] = rf_model
-        model_metrics['random_forest'] = rf_metrics
-        all_metrics.append(ModelMetrics(model_name='random_forest', **rf_metrics))
-        
-        # Train Extra Trees
-        print("Training Extra Trees...")
-        et_model, et_metrics = train_extra_trees(X_train, y_train, X_test, y_test, n_estimators, max_depth)
-        trained_models['extra_trees'] = et_model
-        model_metrics['extra_trees'] = et_metrics
-        all_metrics.append(ModelMetrics(model_name='extra_trees', **et_metrics))
-        
-        # Train CatBoost (optional)
-        if include_catboost:
-            print("Training CatBoost...")
-            cb_model, cb_metrics = train_catboost(X_train, y_train, X_test, y_test, n_estimators, learning_rate, max_depth)
-            if cb_model is not None:
-                trained_models['catboost'] = cb_model
-                model_metrics['catboost'] = cb_metrics
-                all_metrics.append(ModelMetrics(model_name='catboost', **cb_metrics))
-        
-        # Find best model based on AUC
-        best_model_name = max(model_metrics.items(), key=lambda x: x[1]['auc'])[0]
-        
-        # Save best model
-        best_model_path = MODELS_DIR / f"{best_model_name}_best.pkl"
-        joblib.dump(trained_models[best_model_name], best_model_path)
-    
-    return TrainingResponse(
-        message="Models trained successfully",
-        metrics=all_metrics,
-        best_model=best_model_name
-    )
+            # Record training metrics
+            training_duration = time.time() - training_start_time
+            for model_name in trained_models.keys():
+                metrics_collector.record_model_training(model_name, training_duration / len(trained_models))
+            
+            logger.info(f"Training completed successfully - Duration: {training_duration:.2f}s, Best model: {best_model_name}")
+            
+            return TrainingResponse(
+                message="Models trained successfully",
+                metrics=all_metrics,
+                best_model=best_model_name
+            )
+    except Exception as e:
+        training_duration = time.time() - training_start_time
+        logger.error(f"Training failed after {training_duration:.2f}s: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Training failed: {str(e)}"
+        )
 
 @app.post("/optimize", response_model=OptimizationResponse)
 def optimize_hyperparameters(
@@ -1192,12 +1227,16 @@ def predict(
     current_user: User = Depends(get_current_active_user)
 ):
     """Make prediction using specified model or best model"""
+    prediction_start_time = time.time()
+    
     if not trained_models:
+        logger.warning("Prediction attempted but no models are trained")
         raise HTTPException(status_code=404, detail="No models trained yet. Call /train first.")
     
     # Use specified model or best model
     model_key = model_name if model_name and model_name in trained_models else best_model_name
     if model_key is None:
+        logger.warning("Prediction attempted but no models available")
         raise HTTPException(status_code=404, detail="No models available for prediction.")
     
     model = trained_models[model_key]
@@ -1205,6 +1244,7 @@ def predict(
     # Validate feature count
     expected_features = len(feature_names) if feature_names else (X_test_global.shape[1] if X_test_global is not None else None)
     if expected_features and len(request.features) != expected_features:
+        logger.warning(f"Invalid feature count - Expected: {expected_features}, Got: {len(request.features)}")
         raise HTTPException(
             status_code=422,
             detail=f"Invalid number of features. Expected {expected_features}, got {len(request.features)}."
@@ -1218,6 +1258,12 @@ def predict(
         prediction = model.predict(features)[0]
         prediction_proba = model.predict_proba(features)[0]
         
+        # Record prediction metrics
+        prediction_duration = time.time() - prediction_start_time
+        metrics_collector.record_model_prediction(model_key, prediction_duration)
+        
+        logger.debug(f"Prediction successful - Model: {model_key}, Duration: {prediction_duration:.3f}s")
+        
         return {
             "model_used": model_key,
             "prediction": int(prediction),
@@ -1227,11 +1273,13 @@ def predict(
             }
         }
     except ValueError as e:
+        logger.error(f"Prediction ValueError: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=422,
             detail=f"Invalid feature values: {str(e)}"
         )
     except Exception as e:
+        logger.error(f"Prediction error: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Prediction error: {str(e)}"
@@ -1969,10 +2017,157 @@ def predict_ensemble(
             detail=f"Invalid feature values: {str(e)}"
         )
     except Exception as e:
+        logger.error(f"Ensemble prediction error: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Prediction error: {str(e)}"
         )
+
+
+# ==================== Monitoring Endpoints ====================
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint - no authentication required
+    Returns basic health status of the API
+    """
+    try:
+        # Check if data directory is accessible
+        data_dir_ok = DATA_DIR.exists() and DATA_DIR.is_dir()
+        
+        # Check if models directory is accessible
+        models_dir_ok = MODELS_DIR.exists() and MODELS_DIR.is_dir()
+        
+        # Check if MLflow is available (if configured)
+        mlflow_ok = MLFLOW_AVAILABLE
+        
+        # Overall health status
+        healthy = data_dir_ok and models_dir_ok
+        
+        status_code = 200 if healthy else 503
+        
+        return {
+            "status": "healthy" if healthy else "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "checks": {
+                "data_directory": "ok" if data_dir_ok else "error",
+                "models_directory": "ok" if models_dir_ok else "error",
+                "mlflow": "available" if mlflow_ok else "unavailable"
+            },
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Health check failed: {str(e)}"
+        )
+
+
+@app.get("/model/status")
+def model_status(current_user: User = Depends(get_current_active_user)):
+    """
+    Get status of all trained models
+    Returns information about available models and their status
+    """
+    try:
+        models_status = {}
+        
+        # Check each trained model
+        for model_name, model in trained_models.items():
+            model_path = MODELS_DIR / f"{model_name}_best.pkl"
+            model_exists = model_path.exists()
+            
+            models_status[model_name] = {
+                "loaded": True,
+                "saved": model_exists,
+                "has_metrics": model_name in model_metrics,
+                "metrics": model_metrics.get(model_name, {})
+            }
+        
+        # Check saved models that might not be loaded
+        if MODELS_DIR.exists():
+            saved_models = [f.stem for f in MODELS_DIR.glob("*.pkl")]
+            for saved_model in saved_models:
+                model_name = saved_model.replace("_best", "").replace("_optimized", "")
+                if model_name not in models_status:
+                    models_status[model_name] = {
+                        "loaded": False,
+                        "saved": True,
+                        "has_metrics": False,
+                        "metrics": {}
+                    }
+        
+        # Check ensembles
+        ensembles_status = {}
+        for ensemble_name, ensemble in ensemble_models.items():
+            ensemble_path = MODELS_DIR / f"{ensemble_name}.pkl"
+            ensembles_status[ensemble_name] = {
+                "loaded": True,
+                "saved": ensemble_path.exists(),
+                "type": type(ensemble).__name__
+            }
+        
+        return {
+            "trained_models": models_status,
+            "ensembles": ensembles_status,
+            "best_model": best_model_name,
+            "total_models": len(trained_models),
+            "total_ensembles": len(ensemble_models),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Model status error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get model status: {str(e)}"
+        )
+
+
+@app.get("/monitoring/metrics")
+def get_monitoring_metrics(current_user: User = Depends(get_current_active_user)):
+    """
+    Get monitoring metrics and statistics
+    Returns API performance metrics, request statistics, and model usage metrics
+    """
+    try:
+        stats = metrics_collector.get_stats()
+        return {
+            "system_metrics": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Monitoring metrics error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get monitoring metrics: {str(e)}"
+        )
+
+
+@app.get("/monitoring/errors")
+def get_recent_errors(
+    limit: int = 20,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get recent errors from the API
+    Returns a list of recent errors with details
+    """
+    try:
+        errors = metrics_collector.get_recent_errors(limit=limit)
+        return {
+            "errors": errors,
+            "count": len(errors),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Recent errors retrieval error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get recent errors: {str(e)}"
+        )
+
 
 if __name__ == "__main__":
     import uvicorn

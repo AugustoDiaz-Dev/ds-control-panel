@@ -13,6 +13,7 @@ An interactive Data Science control panel for real-time experimentation with a F
 - **Hyperparameter Optimization**: Automated tuning using Optuna
 - **SHAP Values**: Model interpretability with SHAP (SHapley Additive exPlanations) values
 - **Model Ensembles**: Voting, Stacking, and Weighted ensemble methods
+- **Basic Monitoring**: Structured logging, request/response metrics, health checks, and error tracking
 - **Docker Support**: Containerized deployment with Docker Compose
 - **Interactive Dashboard**: Real-time visualizations (ROC curves, confusion matrices, feature importance)
 - **Comprehensive Testing**: Unit, integration, and model validation tests
@@ -31,6 +32,10 @@ v-3/
 │   │   ├── index.html
 │   │   └── dashboard.html
 │   ├── config/           # Configuration files
+│   ├── monitoring/       # Monitoring and logging
+│   │   ├── logger.py     # Structured logging configuration
+│   │   ├── metrics.py     # Metrics collection
+│   │   └── middleware.py  # Request/response logging middleware
 │   └── utils/            # Utility functions
 ├── tests/                # Test suite
 │   ├── unit/
@@ -117,6 +122,12 @@ python -m http.server 8080
 - `GET /mlflow/experiments` - List MLflow experiments
 - `GET /mlflow/runs` - List MLflow runs
 
+### Monitoring Endpoints
+- `GET /health` - Health check endpoint (no authentication required)
+- `GET /model/status` - Get status of all trained models (requires authentication)
+- `GET /monitoring/metrics` - Get API performance metrics and statistics (requires authentication)
+- `GET /monitoring/errors` - Get recent errors from the API (requires authentication)
+
 See API documentation at `http://localhost:8000/docs`
 
 ### Authentication Usage
@@ -182,6 +193,49 @@ curl "http://localhost:8000/shap/values/random_forest?sample_size=100" \
 curl "http://localhost:8000/shap/explain/random_forest?features=750,80000,15000,35,60000,8,25000" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+### Example: Monitoring
+
+```bash
+# Health check (no auth required)
+curl "http://localhost:8000/health"
+
+# Get model status
+curl "http://localhost:8000/model/status" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get monitoring metrics
+curl "http://localhost:8000/monitoring/metrics" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get recent errors
+curl "http://localhost:8000/monitoring/errors?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Monitoring
+
+The application includes comprehensive monitoring capabilities:
+
+### Logging
+- **Structured Logging**: All logs are written to `logs/` directory
+  - `logs/app.log` - Application logs (all levels)
+  - `logs/errors.log` - Error logs only
+  - `logs/access.log` - HTTP access logs
+- **Log Rotation**: Logs are automatically rotated when they reach 10MB (keeps 5 backups)
+- **Log Levels**: Configurable via `setup_logging()` function
+
+### Metrics Collection
+The system automatically tracks:
+- **Request Metrics**: Total requests, requests per second, response times (avg, p50, p95, p99)
+- **Error Tracking**: Error rates, recent errors with details
+- **Model Metrics**: Training times, prediction times, usage counts per model
+- **Endpoint Statistics**: Request counts and error rates per endpoint
+
+### Health Monitoring
+- **Health Check**: `/health` endpoint provides system health status
+- **Model Status**: `/model/status` shows which models are loaded and available
+- **Performance Metrics**: `/monitoring/metrics` provides detailed performance statistics
 
 ## Testing
 
