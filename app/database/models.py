@@ -101,7 +101,7 @@ class ModelMetadata(Base):
     is_production = Column(Boolean, default=False)
     
     # Additional metadata
-    metadata = Column(JSON, nullable=True)
+    additional_metadata = Column(JSON, nullable=True)
     
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

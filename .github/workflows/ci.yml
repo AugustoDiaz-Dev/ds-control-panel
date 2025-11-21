@@ -12,6 +12,21 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: dscontrol
+          POSTGRES_PASSWORD: dscontrol123
+          POSTGRES_DB: ds_control_panel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -29,7 +44,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc g++ libomp-dev build-essential cmake
+        sudo apt-get install -y gcc g++ libomp-dev build-essential cmake libpq-dev
       timeout-minutes: 5
     
     - name: Install Python dependencies
@@ -37,6 +52,12 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install --no-cache-dir -r requirements.txt
       timeout-minutes: 20
+      env:
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DB_USER: dscontrol
+        DB_PASSWORD: dscontrol123
+        DB_NAME: ds_control_panel
     
     - name: Run all tests with coverage
       continue-on-error: true
