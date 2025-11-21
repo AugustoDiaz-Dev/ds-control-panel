@@ -126,6 +126,16 @@ if MLFLOW_AVAILABLE:
     mlflow.set_tracking_uri(str(MLFLOW_DIR))
     mlflow.set_experiment("ds-control-panel-v2")
 
+# Initialize database
+try:
+    from app.database import init_db, check_db_connection
+    init_db()
+    logger.info("Database initialized successfully")
+except ImportError:
+    logger.info("Database module not available, using file-based storage")
+except Exception as e:
+    logger.warning(f"Database initialization failed: {str(e)}, using file-based storage")
+
 # Request/Response models
 class PredictionRequest(BaseModel):
     features: list
@@ -2042,19 +2052,36 @@ def health_check():
         # Check if MLflow is available (if configured)
         mlflow_ok = MLFLOW_AVAILABLE
         
+        # Check database connection
+        db_ok = False
+        try:
+            from app.database.config import check_db_connection
+            db_ok = check_db_connection()
+        except ImportError:
+            db_ok = None  # Database module not available
+        except Exception:
+            db_ok = False
+        
         # Overall health status
         healthy = data_dir_ok and models_dir_ok
         
         status_code = 200 if healthy else 503
         
+        checks = {
+            "data_directory": "ok" if data_dir_ok else "error",
+            "models_directory": "ok" if models_dir_ok else "error",
+            "mlflow": "available" if mlflow_ok else "unavailable"
+        }
+        
+        if db_ok is not None:
+            checks["database"] = "ok" if db_ok else "error"
+        else:
+            checks["database"] = "not_configured"
+        
         return {
             "status": "healthy" if healthy else "degraded",
             "timestamp": datetime.now().isoformat(),
-            "checks": {
-                "data_directory": "ok" if data_dir_ok else "error",
-                "models_directory": "ok" if models_dir_ok else "error",
-                "mlflow": "available" if mlflow_ok else "unavailable"
-            },
+            "checks": checks,
             "version": "1.0.0"
         }
     except Exception as e:

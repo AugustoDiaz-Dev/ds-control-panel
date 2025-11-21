@@ -1,4 +1,25 @@
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ds-control-panel-postgres
+    environment:
+      POSTGRES_USER: dscontrol
+      POSTGRES_PASSWORD: dscontrol123
+      POSTGRES_DB: ds_control_panel
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dscontrol"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ds-control-panel-network
+
   # FastAPI Backend
   backend:
     build:
@@ -13,6 +34,14 @@ services:
       - ./mlruns:/app/mlruns
     environment:
       - PYTHONUNBUFFERED=1
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=dscontrol
+      - DB_PASSWORD=dscontrol123
+      - DB_NAME=ds_control_panel
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 30s
@@ -63,4 +92,7 @@ services:
 networks:
   ds-control-panel-network:
     driver: bridge
+
+volumes:
+  postgres_data:
 
